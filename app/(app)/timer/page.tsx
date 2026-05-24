@@ -10,7 +10,7 @@ export default async function TimerPage() {
 
   const categoryModel = new CategoryModel(supabase);
 
-  const [categories, { data: sessions }] = await Promise.all([
+  const [categories, { data: sessions }, { data: profile }] = await Promise.all([
     categoryModel.findAllByUser(user!.id),
     supabase
       .from('study_sessions')
@@ -18,12 +18,19 @@ export default async function TimerPage() {
       .eq('user_id', user!.id)
       .order('started_at', { ascending: false })
       .limit(50),
+    supabase
+      .from('profiles')
+      .select('daily_goal_minutes, weekly_goal_minutes')
+      .eq('id', user!.id)
+      .single(),
   ]);
 
   return (
     <TimerClient
       categories={categories}
       initialSessions={sessions ?? []}
+      dailyGoal={profile?.daily_goal_minutes ?? 60}
+      weeklyGoal={profile?.weekly_goal_minutes ?? 300}
     />
   );
 }

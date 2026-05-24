@@ -10,7 +10,7 @@ const roboto = Roboto({
 });
 
 export const metadata: Metadata = {
-  title: 'StudyHub — Tu espacio de estudio',
+  title: 'StudyHub | Tu espacio de estudio',
   description:
     'Centraliza tus apuntes, tareas y sesiones de estudio en un solo lugar.',
 };

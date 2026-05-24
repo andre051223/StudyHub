@@ -1,13 +1,16 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Pause, Square, RotateCcw, Coffee } from 'lucide-react';
+import ReactDOM from 'react-dom/client';
+import { Play, Pause, Square, RotateCcw, Coffee, PictureInPicture2 } from 'lucide-react';
+import { MiniTimer } from './MiniTimer';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import type { Category, StudySession, StudyMode, TimerState } from '@/lib/types';
 import { formatDuration, getCircumference } from '@/lib/utils';
 import { SessionHistory } from './SessionHistory';
 import { StudyStats } from './StudyStats';
+import { StudyGoals } from './StudyGoals';
 
 const STORAGE_KEY = 'studyhub_timer_state';
 const POMODORO_STUDY = 25 * 60;
@@ -31,16 +34,25 @@ const defaultState: TimerState = {
 interface Props {
   categories: Category[];
   initialSessions: (StudySession & { category?: { name: string; color: string } | null })[];
+  dailyGoal: number;
+  weeklyGoal: number;
 }
 
-export function TimerClient({ categories, initialSessions }: Props) {
+export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal }: Props) {
   const supabase = createClient();
   const [state, setState] = useState<TimerState>(defaultState);
   const [secondsLeft, setSecondsLeft] = useState(defaultState.durationMinutes * 60);
-  const [activeTab, setActiveTab] = useState<'history' | 'stats'>('history');
+  const [activeTab, setActiveTab] = useState<'history' | 'stats' | 'goals'>('history');
   const [sessions, setSessions] = useState(initialSessions);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const savingRef = useRef(false);
+  const stateRef = useRef(state);
+  const pipRootRef = useRef<ReturnType<typeof ReactDOM.createRoot> | null>(null);
+  const [pipWindow, setPipWindow] = useState<Window | null>(null);
+
+  // Keep stateRef in sync so async callbacks always see latest state
+  useEffect(() => { stateRef.current = state; });
 
   // Load persisted state on mount (client only)
   useEffect(() => {
@@ -75,9 +87,12 @@ export function TimerClient({ categories, initialSessions }: Props) {
   useEffect(() => {
     if (state.isRunning && !state.isPaused) {
       tickRef.current = setInterval(() => {
-        const left = computeSecondsLeft(state);
+        const left = computeSecondsLeft(stateRef.current);
         setSecondsLeft(left);
-        if (left <= 0) handlePhaseComplete();
+        if (left <= 0 && !savingRef.current) {
+          savingRef.current = true;
+          handlePhaseComplete().finally(() => { savingRef.current = false; });
+        }
       }, 500);
     } else {
       if (tickRef.current) clearInterval(tickRef.current);
@@ -85,6 +100,50 @@ export function TimerClient({ categories, initialSessions }: Props) {
     }
     return () => { if (tickRef.current) clearInterval(tickRef.current); };
   }, [state.isRunning, state.isPaused, state.startedAt, state.durationMinutes]);
+
+  async function openPiP() {
+    if (!('documentPictureInPicture' in window)) {
+      toast.error('Tu navegador no soporta la ventana flotante. Usa Chrome o Edge 116+.');
+      return;
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pip: Window = await (window as any).documentPictureInPicture.requestWindow({
+        width: 260,
+        height: 170,
+        disallowReturnToOpener: false,
+      });
+      pip.addEventListener('pagehide', () => setPipWindow(null));
+      setPipWindow(pip);
+    } catch {
+      toast.error('No se pudo abrir la ventana flotante');
+    }
+  }
+
+  // Sync mini timer into PiP window
+  useEffect(() => {
+    if (!pipWindow) return;
+    if (!pipRootRef.current) {
+      pipRootRef.current = ReactDOM.createRoot(pipWindow.document.body);
+    }
+    pipRootRef.current.render(
+      <MiniTimer
+        secondsLeft={secondsLeft}
+        phaseLabel={phaseLabel}
+        isRunning={state.isRunning}
+        isPaused={state.isPaused}
+        onPause={handlePause}
+        onResume={handleResume}
+      />
+    );
+  }, [pipWindow, secondsLeft, state.isRunning, state.isPaused, state.pomodoroPhase]);
+
+  // Clean up PiP root when window closes
+  useEffect(() => {
+    if (!pipWindow) {
+      pipRootRef.current = null;
+    }
+  }, [pipWindow]);
 
   function playBell() {
     try {
@@ -121,16 +180,17 @@ export function TimerClient({ categories, initialSessions }: Props) {
   }
 
   async function handlePhaseComplete() {
+    const s = stateRef.current;
     playBell();
-    if (state.mode === 'simple') {
+    if (s.mode === 'simple') {
       sendBrowserNotification('¡Sesión completada! Tiempo de descansar.');
       await saveSession(true);
-      setState({ ...defaultState, mode: state.mode, durationMinutes: state.durationMinutes, categoryId: state.categoryId });
+      setState({ ...defaultState, mode: s.mode, durationMinutes: s.durationMinutes, categoryId: s.categoryId });
       toast.success('¡Sesión completada!');
     } else {
       // Pomodoro phase transition
-      if (state.pomodoroPhase === 'study') {
-        const newCycle = state.pomodoroCycle + 1;
+      if (s.pomodoroPhase === 'study') {
+        const newCycle = s.pomodoroCycle + 1;
         const isLong = newCycle % 4 === 0;
         const nextPhase = isLong ? 'long_break' : 'short_break';
         sendBrowserNotification(isLong ? '¡Descanso largo! 15 min.' : '¡Descanso corto! 5 min.');
@@ -156,21 +216,26 @@ export function TimerClient({ categories, initialSessions }: Props) {
   }
 
   async function saveSession(completed: boolean) {
-    const actual = state.durationMinutes * 60 - computeSecondsLeft(state);
+    const s = stateRef.current;
+    const actual = s.durationMinutes * 60 - computeSecondsLeft(s);
     const { data, error } = await supabase
       .from('study_sessions')
       .insert({
-        category_id: state.categoryId,
-        duration_minutes: state.durationMinutes,
+        category_id: s.categoryId,
+        duration_minutes: s.durationMinutes,
         actual_duration_seconds: actual,
-        mode: state.mode,
-        pomodoro_cycles_completed: state.pomodoroCycle,
-        started_at: new Date(state.startedAt!).toISOString(),
+        mode: s.mode,
+        pomodoro_cycles_completed: s.pomodoroCycle,
+        started_at: new Date(s.startedAt!).toISOString(),
         completed_at: completed ? new Date().toISOString() : null,
       })
       .select('*, category:categories(name, color)')
       .single();
-    if (!error && data) {
+    if (error) {
+      toast.error('Error al guardar la sesión');
+      return;
+    }
+    if (data) {
       setSessions((prev) => [data as typeof sessions[0], ...prev]);
     }
   }
@@ -202,8 +267,9 @@ export function TimerClient({ categories, initialSessions }: Props) {
   }
 
   async function handleStop() {
-    if (state.startedAt) await saveSession(false);
-    setState({ ...defaultState, mode: state.mode, durationMinutes: state.durationMinutes, categoryId: state.categoryId });
+    const s = stateRef.current;
+    if (s.startedAt) await saveSession(false);
+    setState({ ...defaultState, mode: s.mode, durationMinutes: s.durationMinutes, categoryId: s.categoryId });
     toast.info('Sesión detenida');
   }
 
@@ -306,6 +372,15 @@ export function TimerClient({ categories, initialSessions }: Props) {
                     <Square size={16} />
                     Detener
                   </button>
+                  {!pipWindow && (
+                    <button
+                      onClick={openPiP}
+                      title="Ventana flotante"
+                      className="flex items-center gap-2 px-3 py-2.5 border border-[var(--color-gray-border)] text-[var(--color-text-soft)] font-medium rounded-xl hover:bg-[var(--color-gray-light)] transition-colors"
+                    >
+                      <PictureInPicture2 size={16} />
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -397,7 +472,7 @@ export function TimerClient({ categories, initialSessions }: Props) {
       {/* History / Stats */}
       <div className="bg-white rounded-2xl shadow-[var(--shadow-card)] overflow-hidden">
         <div className="flex border-b border-[var(--color-gray-border)]">
-          {(['history', 'stats'] as const).map((tab) => (
+          {(['history', 'stats', 'goals'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -407,7 +482,7 @@ export function TimerClient({ categories, initialSessions }: Props) {
                   : 'text-[var(--color-text-soft)] hover:text-[var(--color-text)]'
               }`}
             >
-              {tab === 'history' ? 'Historial' : 'Estadísticas'}
+              {tab === 'history' ? 'Historial' : tab === 'stats' ? 'Estadísticas' : 'Rachas'}
             </button>
           ))}
         </div>
@@ -415,8 +490,10 @@ export function TimerClient({ categories, initialSessions }: Props) {
         <div className="p-6">
           {activeTab === 'history' ? (
             <SessionHistory sessions={sessions} />
-          ) : (
+          ) : activeTab === 'stats' ? (
             <StudyStats sessions={sessions} />
+          ) : (
+            <StudyGoals sessions={sessions} dailyGoal={dailyGoal} weeklyGoal={weeklyGoal} />
           )}
         </div>
       </div>

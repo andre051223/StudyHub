@@ -3,6 +3,8 @@ export interface Profile {
   full_name: string;
   avatar_url: string | null;
   created_at: string;
+  daily_goal_minutes: number;
+  weekly_goal_minutes: number;
 }
 
 export interface Folder {

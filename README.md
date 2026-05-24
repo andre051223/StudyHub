@@ -5,7 +5,7 @@
 **Asignatura:** Desarrollo Web  
 **Institución:** Fundación Universitaria del Área Andina  
 **Autor:** Diego  
-**Fecha de entrega:** 20 de Abril de 2026
+**Fecha de entrega:** 1 de Junio de 2026
 
 ---
 
