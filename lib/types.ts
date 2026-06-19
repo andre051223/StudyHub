@@ -66,7 +66,7 @@ export interface Category {
   created_at: string;
 }
 
-export type StudyMode = 'simple' | 'pomodoro';
+export type StudyMode = 'simple' | 'pomodoro' | 'stopwatch';
 
 export interface StudySession {
   id: string;

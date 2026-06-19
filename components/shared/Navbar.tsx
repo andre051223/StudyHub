@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { ThemeToggle } from './ThemeToggle';
 
 const NAV_LINKS = [
   { href: '/notes', label: 'Notas', icon: BookOpen },
@@ -51,7 +52,7 @@ export function Navbar({ userEmail, userName }: NavbarProps) {
     : userEmail?.[0].toUpperCase() ?? 'U';
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-40 h-[68px] bg-white border-b border-[var(--color-gray-border)] flex items-center px-6">
+    <header className="fixed top-0 left-0 right-0 z-40 h-[68px] bg-[var(--color-surface)] border-b border-[var(--color-gray-border)] flex items-center px-6">
       {/* Logo */}
       <Link href="/dashboard" className="flex items-center gap-2 mr-8 flex-shrink-0">
         <div className="w-8 h-8 rounded-lg bg-[var(--color-primary)] flex items-center justify-center">
@@ -81,8 +82,13 @@ export function Navbar({ userEmail, userName }: NavbarProps) {
         })}
       </nav>
 
+      {/* Theme toggle (desktop) */}
+      <div className="hidden md:flex items-center ml-auto mr-1">
+        <ThemeToggle />
+      </div>
+
       {/* User menu (desktop) */}
-      <div className="hidden md:block relative ml-auto">
+      <div className="hidden md:block relative">
         <button
           onClick={() => setUserMenuOpen((v) => !v)}
           className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--color-gray-light)] transition-colors"
@@ -102,7 +108,7 @@ export function Navbar({ userEmail, userName }: NavbarProps) {
               className="fixed inset-0 z-10"
               onClick={() => setUserMenuOpen(false)}
             />
-            <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-xl shadow-[var(--shadow-card)] border border-[var(--color-gray-border)] z-20 py-1">
+            <div className="absolute right-0 top-full mt-1 w-56 bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-card)] border border-[var(--color-gray-border)] z-20 py-1">
               <div className="px-4 py-3 border-b border-[var(--color-gray-border)]">
                 <p className="text-sm font-medium text-[var(--color-text)] truncate">
                   {userName || 'Usuario'}
@@ -137,18 +143,21 @@ export function Navbar({ userEmail, userName }: NavbarProps) {
         )}
       </div>
 
-      {/* Mobile hamburger */}
-      <button
-        className="md:hidden ml-auto p-2 rounded-lg hover:bg-[var(--color-gray-light)]"
-        onClick={() => setMenuOpen((v) => !v)}
-        aria-label="Menú"
-      >
-        {menuOpen ? <X size={20} /> : <Menu size={20} />}
-      </button>
+      {/* Mobile actions */}
+      <div className="md:hidden ml-auto flex items-center gap-1">
+        <ThemeToggle />
+        <button
+          className="p-2 rounded-lg hover:bg-[var(--color-gray-light)]"
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-label="Menú"
+        >
+          {menuOpen ? <X size={20} /> : <Menu size={20} />}
+        </button>
+      </div>
 
       {/* Mobile menu */}
       {menuOpen && (
-        <div className="absolute top-[68px] left-0 right-0 bg-white border-b border-[var(--color-gray-border)] p-4 flex flex-col gap-1 md:hidden z-50">
+        <div className="absolute top-[68px] left-0 right-0 bg-[var(--color-surface)] border-b border-[var(--color-gray-border)] p-4 flex flex-col gap-1 md:hidden z-50">
           {NAV_LINKS.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}

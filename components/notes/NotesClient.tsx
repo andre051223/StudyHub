@@ -106,7 +106,7 @@ export function NotesClient({ initialFolders, initialNotes }: Props) {
   return (
     <div className="flex h-[calc(100vh-68px)]">
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-[var(--color-gray-border)] flex flex-col flex-shrink-0">
+      <aside className="w-64 bg-[var(--color-surface)] border-r border-[var(--color-gray-border)] flex flex-col flex-shrink-0">
         <div className="p-4 border-b border-[var(--color-gray-border)]">
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-gray-mid)]" />
@@ -164,7 +164,7 @@ export function NotesClient({ initialFolders, initialNotes }: Props) {
                   }}
                   autoFocus
                   placeholder="Nombre de carpeta"
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-primary)] focus:outline-none bg-white"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-primary)] focus:outline-none bg-[var(--color-surface)]"
                 />
               </div>
             )}
@@ -228,7 +228,7 @@ export function NotesClient({ initialFolders, initialNotes }: Props) {
 
       {/* Notes list */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-[var(--color-gray-border)]">
+        <div className="flex items-center justify-between px-6 py-4 bg-[var(--color-surface)] border-b border-[var(--color-gray-border)]">
           <h2 className="font-semibold text-[var(--color-text)]">
             {selectedFolderId === 'inbox'
               ? 'Inbox'
@@ -289,7 +289,7 @@ function NoteListItem({
 
   return (
     <div
-      className="bg-white rounded-xl p-4 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-all hover:-translate-y-0.5 cursor-pointer relative group"
+      className="bg-[var(--color-surface)] rounded-xl p-4 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-all hover:-translate-y-0.5 cursor-pointer relative group"
       onClick={() => router.push(`/notes/${note.id}`)}
     >
       <div className="flex items-start justify-between gap-2">
@@ -335,7 +335,7 @@ function NoteListItem({
           {menuOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-              <div className="absolute right-0 top-full mt-1 w-36 bg-white rounded-lg shadow-[var(--shadow-card)] border border-[var(--color-gray-border)] z-20 py-1">
+              <div className="absolute right-0 top-full mt-1 w-36 bg-[var(--color-surface)] rounded-lg shadow-[var(--shadow-card)] border border-[var(--color-gray-border)] z-20 py-1">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

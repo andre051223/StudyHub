@@ -62,10 +62,14 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
     });
   }, []);
 
-  // Load persisted state on mount (client only)
+  // Load persisted state on mount (client only). Se hace en un effect, y no en
+  // un inicializador lazy de useState, para que el render del servidor y el
+  // primer render del cliente coincidan (localStorage no existe en SSR) y no se
+  // produzca un mismatch de hidratación.
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hidratación desde localStorage
       if (saved) setState(JSON.parse(saved));
     } catch {}
   }, []);
@@ -75,14 +79,22 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
-  // Compute seconds left from timestamps
-  const computeSecondsLeft = useCallback((s: TimerState): number => {
-    if (!s.isRunning && !s.isPaused) return s.durationMinutes * 60;
-    const totalDuration = getPhaseDuration(s) * 1000;
+  // Compute elapsed seconds since the timer started (used by the stopwatch
+  // and to derive the remaining time for countdown modes).
+  const computeElapsedSeconds = useCallback((s: TimerState): number => {
+    if (!s.isRunning && !s.isPaused) return 0;
     const now = s.isPaused ? s.pausedAt! : Date.now();
-    const elapsed = now - s.startedAt! - s.totalPausedMs;
-    return Math.max(0, Math.floor((totalDuration - elapsed) / 1000));
+    return Math.max(0, Math.floor((now - s.startedAt! - s.totalPausedMs) / 1000));
   }, []);
+
+  // Compute seconds left from timestamps (countdown modes only)
+  const computeSecondsLeft = useCallback(
+    (s: TimerState): number => {
+      if (!s.isRunning && !s.isPaused) return s.durationMinutes * 60;
+      return Math.max(0, getPhaseDuration(s) - computeElapsedSeconds(s));
+    },
+    [computeElapsedSeconds]
+  );
 
   function getPhaseDuration(s: TimerState): number {
     if (s.mode === 'simple') return s.durationMinutes * 60;
@@ -91,23 +103,28 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
     return POMODORO_SHORT;
   }
 
-  // Tick
+  // Tick. `secondsLeft` holds the value shown on screen: remaining seconds for
+  // countdown modes, elapsed seconds for the stopwatch.
   useEffect(() => {
+    const tick = (s: TimerState) =>
+      s.mode === 'stopwatch' ? computeElapsedSeconds(s) : computeSecondsLeft(s);
+
     if (state.isRunning && !state.isPaused) {
       tickRef.current = setInterval(() => {
-        const left = computeSecondsLeft(stateRef.current);
-        setSecondsLeft(left);
-        if (left <= 0 && !savingRef.current) {
+        const value = tick(stateRef.current);
+        setSecondsLeft(value);
+        // The stopwatch counts up with no target, so it never auto-completes.
+        if (stateRef.current.mode !== 'stopwatch' && value <= 0 && !savingRef.current) {
           savingRef.current = true;
           handlePhaseComplete().finally(() => { savingRef.current = false; });
         }
       }, 500);
     } else {
       if (tickRef.current) clearInterval(tickRef.current);
-      setSecondsLeft(computeSecondsLeft(state));
+      setSecondsLeft(tick(state));
     }
     return () => { if (tickRef.current) clearInterval(tickRef.current); };
-  }, [state.isRunning, state.isPaused, state.startedAt, state.durationMinutes]);
+  }, [state.isRunning, state.isPaused, state.startedAt, state.durationMinutes, state.mode]);
 
   async function openPiP() {
     if (!('documentPictureInPicture' in window)) {
@@ -121,6 +138,23 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
         height: 170,
         disallowReturnToOpener: false,
       });
+
+      // Reset de la ventana flotante + copia de las variables de tema actuales
+      // para que el MiniTimer herede los colores (incluido el modo oscuro) y su
+      // contenido escale al redimensionar la ventana.
+      const theme = document.documentElement.dataset.theme ?? 'light';
+      const root = getComputedStyle(document.documentElement);
+      const vars = ['--color-surface', '--color-text', '--color-text-soft', '--color-gray-border']
+        .map((v) => `${v}: ${root.getPropertyValue(v).trim()};`)
+        .join(' ');
+      const style = pip.document.createElement('style');
+      style.textContent = `
+        html, body { margin: 0; height: 100%; overflow: hidden; }
+        body { ${vars} }
+      `;
+      pip.document.head.appendChild(style);
+      pip.document.documentElement.dataset.theme = theme;
+
       pip.addEventListener('pagehide', () => setPipWindow(null));
       setPipWindow(pip);
     } catch {
@@ -233,13 +267,18 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
       toast.error('Error al guardar la sesión: usuario no autenticado');
       return;
     }
-    const actual = s.durationMinutes * 60 - computeSecondsLeft(s);
+    // Tiempo realmente estudiado. En el cronómetro no hay duración planeada,
+    // así que se usa el tiempo transcurrido directamente.
+    const actual =
+      s.mode === 'stopwatch'
+        ? computeElapsedSeconds(s)
+        : s.durationMinutes * 60 - computeSecondsLeft(s);
     const { data, error } = await supabase
       .from('study_sessions')
       .insert({
         user_id: userIdRef.current,
         category_id: s.categoryId,
-        duration_minutes: s.durationMinutes,
+        duration_minutes: s.mode === 'stopwatch' ? Math.round(actual / 60) : s.durationMinutes,
         actual_duration_seconds: actual,
         mode: s.mode,
         pomodoro_cycles_completed: s.pomodoroCycle,
@@ -290,9 +329,19 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
     toast.info('Sesión detenida');
   }
 
+  const isStopwatch = state.mode === 'stopwatch';
   const totalDuration = getPhaseDuration(state);
-  const displaySeconds = (!state.isRunning && !state.isPaused) ? totalDuration : secondsLeft;
-  const progress = totalDuration > 0 ? (totalDuration - displaySeconds) / totalDuration : 0;
+  const displaySeconds = isStopwatch
+    ? secondsLeft // tiempo transcurrido
+    : (!state.isRunning && !state.isPaused)
+    ? totalDuration
+    : secondsLeft;
+  // El cronómetro no tiene una meta fija: el anillo se muestra completo.
+  const progress = isStopwatch
+    ? 1
+    : totalDuration > 0
+    ? (totalDuration - displaySeconds) / totalDuration
+    : 0;
   const radius = 88;
   const circumference = getCircumference(radius);
   const strokeDashoffset = circumference * (1 - progress);
@@ -304,12 +353,14 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
         : state.pomodoroPhase === 'long_break'
         ? 'Descanso largo'
         : 'Descanso corto'
+      : isStopwatch
+      ? 'Cronómetro'
       : 'Sesión de estudio';
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8">
       {/* Timer card */}
-      <div className="bg-white rounded-2xl p-8 shadow-[var(--shadow-card)] mb-6">
+      <div className="bg-[var(--color-surface)] rounded-2xl p-8 shadow-[var(--shadow-card)] mb-6">
         <div className="flex flex-col lg:flex-row gap-8 items-center">
           {/* Circular timer */}
           <div className="flex flex-col items-center gap-4">
@@ -329,7 +380,7 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
                   r={radius}
                   fill="none"
                   stroke={
-                    state.pomodoroPhase === 'study' || state.mode === 'simple'
+                    state.mode !== 'pomodoro' || state.pomodoroPhase === 'study'
                       ? 'var(--color-primary)'
                       : '#f97316'
                   }
@@ -411,7 +462,7 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
                 Modo
               </label>
               <div className="flex rounded-xl border border-[var(--color-gray-border)] overflow-hidden w-fit">
-                {(['simple', 'pomodoro'] as StudyMode[]).map((m) => (
+                {(['simple', 'pomodoro', 'stopwatch'] as StudyMode[]).map((m) => (
                   <button
                     key={m}
                     onClick={() => !state.isRunning && setState((prev) => ({ ...prev, mode: m }))}
@@ -422,7 +473,7 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
                         : 'text-[var(--color-text-soft)] hover:bg-[var(--color-gray-light)]'
                     }`}
                   >
-                    {m === 'simple' ? 'Simple' : 'Pomodoro'}
+                    {m === 'simple' ? 'Simple' : m === 'pomodoro' ? 'Pomodoro' : 'Cronómetro'}
                   </button>
                 ))}
               </div>
@@ -461,6 +512,14 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
               </div>
             )}
 
+            {isStopwatch && (
+              <div className="bg-[var(--color-gray-light)] rounded-xl p-4 text-sm text-[var(--color-text-soft)]">
+                <p className="font-medium text-[var(--color-text)] mb-1">Cronómetro</p>
+                <p>Cuenta el tiempo hacia arriba, sin límite.</p>
+                <p>Pulsa &quot;Detener&quot; para guardar la sesión.</p>
+              </div>
+            )}
+
             {/* Category */}
             <div>
               <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
@@ -487,7 +546,7 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
       </div>
 
       {/* History / Stats */}
-      <div className="bg-white rounded-2xl shadow-[var(--shadow-card)] overflow-hidden">
+      <div className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-card)] overflow-hidden">
         <div className="flex border-b border-[var(--color-gray-border)]">
           {(['history', 'stats', 'goals'] as const).map((tab) => (
             <button

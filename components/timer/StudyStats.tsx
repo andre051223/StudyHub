@@ -23,6 +23,29 @@ interface Props {
   sessions: (StudySession & { category?: { name: string; color: string } | null })[];
 }
 
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  sub,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string;
+  sub?: string;
+}) {
+  return (
+    <div className="bg-[var(--color-gray-light)] rounded-xl p-4">
+      <div className="flex items-center gap-2 mb-1">
+        <Icon size={16} className="text-[var(--color-primary)]" />
+        <span className="text-xs font-medium text-[var(--color-text-soft)]">{label}</span>
+      </div>
+      <p className="text-2xl font-bold text-[var(--color-text)]">{value}</p>
+      {sub && <p className="text-xs text-[var(--color-gray-mid)] mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
 export function StudyStats({ sessions }: Props) {
   const completedSessions = sessions.filter((s) => s.completed_at !== null);
 
@@ -87,17 +110,6 @@ export function StudyStats({ sessions }: Props) {
 
     return { weekMinutes, dailyData, streak, categoryData, topCategory, avgDaily };
   }, [sessions]);
-
-  const StatCard = ({ icon: Icon, label, value, sub }: { icon: React.ElementType; label: string; value: string; sub?: string }) => (
-    <div className="bg-[var(--color-gray-light)] rounded-xl p-4">
-      <div className="flex items-center gap-2 mb-1">
-        <Icon size={16} className="text-[var(--color-primary)]" />
-        <span className="text-xs font-medium text-[var(--color-text-soft)]">{label}</span>
-      </div>
-      <p className="text-2xl font-bold text-[var(--color-text)]">{value}</p>
-      {sub && <p className="text-xs text-[var(--color-gray-mid)] mt-0.5">{sub}</p>}
-    </div>
-  );
 
   if (completedSessions.length === 0) {
     return (

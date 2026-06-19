@@ -12,8 +12,10 @@ interface Props {
 }
 
 const PRIMARY = '#67b31f';
-const PRIMARY_DARK = '#5a9e1b';
 
+// Los colores se leen de variables CSS inyectadas en la ventana PiP
+// (ver TimerClient.openPiP), con fallback al tema claro. Así la ventana
+// flotante respeta el modo oscuro y el contenido escala con su tamaño.
 export function MiniTimer({ secondsLeft, phaseLabel, isRunning, isPaused, onPause, onResume }: Props) {
   return (
     <div
@@ -22,32 +24,36 @@ export function MiniTimer({ secondsLeft, phaseLabel, isRunning, isPaused, onPaus
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
+        boxSizing: 'border-box',
+        width: '100%',
         height: '100%',
-        background: '#ffffff',
+        background: 'var(--color-surface, #ffffff)',
+        color: 'var(--color-text, #1a1a1a)',
         fontFamily: 'system-ui, sans-serif',
-        gap: 6,
+        gap: '2vmin',
         userSelect: 'none',
-        padding: '16px 20px',
+        padding: '6vmin 8vmin',
+        overflow: 'hidden',
       }}
     >
       <span
         style={{
-          fontSize: 10,
+          fontSize: 'clamp(8px, 5vw, 16px)',
           fontWeight: 600,
           color: PRIMARY,
           textTransform: 'uppercase',
-          letterSpacing: 1.5,
+          letterSpacing: '0.15em',
+          textAlign: 'center',
+          lineHeight: 1.1,
         }}
       >
         {phaseLabel}
       </span>
       <span
         style={{
-          fontSize: 52,
+          fontSize: 'clamp(28px, 18vw, 96px)',
           fontWeight: 700,
-          letterSpacing: 1,
           lineHeight: 1,
-          color: '#1a1a1a',
           fontVariantNumeric: 'tabular-nums',
         }}
       >
@@ -57,26 +63,17 @@ export function MiniTimer({ secondsLeft, phaseLabel, isRunning, isPaused, onPaus
         <button
           onClick={isPaused ? onResume : onPause}
           style={{
-            marginTop: 10,
-            padding: '7px 24px',
+            marginTop: '2vmin',
+            padding: '2vmin 6vmin',
             background: isPaused ? PRIMARY : 'transparent',
-            border: `1.5px solid ${isPaused ? PRIMARY : '#e2e8f0'}`,
-            color: isPaused ? '#ffffff' : '#444444',
-            borderRadius: 12,
-            fontSize: 13,
+            border: `1.5px solid ${isPaused ? PRIMARY : 'var(--color-gray-border, #e2e8f0)'}`,
+            color: isPaused ? '#ffffff' : 'var(--color-text-soft, #444444)',
+            borderRadius: '2vmin',
+            fontSize: 'clamp(10px, 5vw, 18px)',
             fontWeight: 600,
             cursor: 'pointer',
+            whiteSpace: 'nowrap',
             transition: 'all 0.15s ease',
-          }}
-          onMouseEnter={(e) => {
-            if (!isPaused) {
-              (e.currentTarget as HTMLButtonElement).style.background = '#f8f9fa';
-            } else {
-              (e.currentTarget as HTMLButtonElement).style.background = PRIMARY_DARK;
-            }
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = isPaused ? PRIMARY : 'transparent';
           }}
         >
           {isPaused ? 'Reanudar' : 'Pausar'}

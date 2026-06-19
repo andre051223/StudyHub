@@ -66,7 +66,7 @@ export function CategoriesClient({ initialCategories }: Props) {
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow-[var(--shadow-card)] overflow-hidden">
+    <div className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-card)] overflow-hidden">
       {/* New category form */}
       <div className="p-5 border-b border-[var(--color-gray-border)]">
         {!showForm ? (

@@ -41,7 +41,7 @@ export function ProfileClient({ profile, email }: Props) {
   }
 
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-[var(--shadow-card)]">
+    <div className="bg-[var(--color-surface)] rounded-2xl p-6 shadow-[var(--shadow-card)]">
       <div className="flex items-center gap-4 mb-6 pb-6 border-b border-[var(--color-gray-border)]">
         <div className="w-16 h-16 rounded-full bg-[var(--color-primary)] flex items-center justify-center text-white text-2xl font-bold">
           {(profile?.full_name || email)[0]?.toUpperCase()}

@@ -146,7 +146,7 @@ export function NoteEditor({ note, folders }: Props) {
   if (!editor) return null;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-68px)] bg-white">
+    <div className="flex flex-col h-[calc(100vh-68px)] bg-[var(--color-surface)]">
       {/* Top bar */}
       <div className="flex items-center gap-3 px-6 py-3 border-b border-[var(--color-gray-border)]">
         <button

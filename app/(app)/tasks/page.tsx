@@ -21,7 +21,7 @@ export default async function TasksPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-68px)]">
-      <div className="px-6 py-4 bg-white border-b border-[var(--color-gray-border)]">
+      <div className="px-6 py-4 bg-[var(--color-surface)] border-b border-[var(--color-gray-border)]">
         <h1 className="text-xl font-bold text-[var(--color-text)]">Tareas</h1>
         <p className="text-sm text-[var(--color-text-soft)] mt-0.5">
           Matriz de Eisenhower — organiza por urgencia e importancia

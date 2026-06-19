@@ -188,7 +188,7 @@ export function TasksClient({ initialTasks, categories }: Props) {
   return (
     <div className="flex-1 flex flex-col">
       {/* Filters bar */}
-      <div className="flex items-center gap-3 px-6 py-3 bg-white border-b border-[var(--color-gray-border)] flex-wrap">
+      <div className="flex items-center gap-3 px-6 py-3 bg-[var(--color-surface)] border-b border-[var(--color-gray-border)] flex-wrap">
         <Filter size={15} className="text-[var(--color-gray-mid)]" />
         <select
           value={filterCategoryId ?? ''}

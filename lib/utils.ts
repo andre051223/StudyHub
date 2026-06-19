@@ -6,8 +6,13 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60)
+    .toString()
+    .padStart(2, '0');
   const s = (seconds % 60).toString().padStart(2, '0');
+  // El cronómetro puede superar la hora; en ese caso muestra HH:MM:SS.
+  if (h > 0) return `${h.toString().padStart(2, '0')}:${m}:${s}`;
   return `${m}:${s}`;
 }
 

@@ -107,7 +107,7 @@ export default async function DashboardPage() {
               Ver todo <ArrowRight size={14} />
             </Link>
           </div>
-          <div className="bg-white rounded-xl border border-[var(--color-gray-border)] overflow-hidden">
+          <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-gray-border)] overflow-hidden">
             {recentSessions.map((s, i) => (
               <div
                 key={s.id}
@@ -157,7 +157,7 @@ function StatCard({
   };
 
   return (
-    <div className="bg-white rounded-xl p-5 shadow-[var(--shadow-card)]">
+    <div className="bg-[var(--color-surface)] rounded-xl p-5 shadow-[var(--shadow-card)]">
       <p className="text-sm text-[var(--color-text-soft)] mb-1">{label}</p>
       <p className={`text-3xl font-bold ${colors[color].split(' ')[1]}`}>{value}</p>
     </div>
@@ -186,7 +186,7 @@ function QuickCard({
   return (
     <Link
       href={href}
-      className="bg-white rounded-xl p-5 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-all hover:-translate-y-1 flex items-start gap-4"
+      className="bg-[var(--color-surface)] rounded-xl p-5 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-all hover:-translate-y-1 flex items-start gap-4"
     >
       <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${colors[color]}`}>
         <Icon size={20} />

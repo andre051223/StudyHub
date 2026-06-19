@@ -104,7 +104,7 @@ export function TaskModal({ task, defaultQuadrant, categories, onSave, onDelete,
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-gray-border)]">
           <h2 className="font-semibold text-[var(--color-text)]">

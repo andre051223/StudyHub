@@ -45,7 +45,7 @@ export function CategoriesClient({ initialCategories }: Props) {
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow-[var(--shadow-card)] overflow-hidden">
+    <div className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-card)] overflow-hidden">
       {/* Header */}
       <div className="p-5 border-b border-[var(--color-gray-border)] flex items-center justify-between">
         <span className="text-sm text-[var(--color-text-soft)]">
@@ -73,7 +73,7 @@ export function CategoriesClient({ initialCategories }: Props) {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={closeModal}
           />
-          <div className="relative z-10 bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+          <div className="relative z-10 bg-[var(--color-surface)] rounded-2xl shadow-xl w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-semibold text-[var(--color-text)]">
                 {modalState.editing ? 'Editar categoría' : 'Nueva categoría'}

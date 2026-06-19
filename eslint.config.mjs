@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Build artefacts en cualquier subdirectorio (p. ej. studyhub/.next).
+    "**/.next/**",
+    "**/out/**",
+    "**/build/**",
+    "studyhub/**",
   ]),
 ]);
 

@@ -23,7 +23,7 @@ export default async function AppLayout({
     .single();
 
   return (
-    <div className="min-h-screen bg-[var(--color-gray-light)]">
+    <div className="min-h-screen bg-[var(--color-bg)]">
       <Navbar
         userEmail={user.email}
         userName={profile?.full_name ?? undefined}

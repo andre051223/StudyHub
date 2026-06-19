@@ -38,7 +38,7 @@ export function TaskCard({ task, onToggleComplete, onClick, isDragging }: Props)
     <div
       ref={setNodeRef}
       style={style}
-      className={`bg-white rounded-lg p-3 shadow-[var(--shadow-card)] cursor-pointer select-none transition-all ${
+      className={`bg-[var(--color-surface)] rounded-lg p-3 shadow-[var(--shadow-card)] cursor-pointer select-none transition-all ${
         isDragging || isSortableDragging ? 'opacity-50 rotate-1 shadow-lg' : 'hover:-translate-y-0.5'
       } ${task.completed ? 'opacity-60' : ''}`}
       onClick={onClick}
