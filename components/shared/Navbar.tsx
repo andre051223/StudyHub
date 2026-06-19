@@ -133,7 +133,7 @@ export function Navbar({ userEmail, userName }: NavbarProps) {
               </Link>
               <button
                 onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/15 transition-colors"
               >
                 <LogOut size={15} />
                 Cerrar sesión
@@ -176,7 +176,7 @@ export function Navbar({ userEmail, userName }: NavbarProps) {
           <div className="border-t border-[var(--color-gray-border)] mt-2 pt-2">
             <button
               onClick={handleLogout}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-red-600 hover:bg-red-50 transition-colors"
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/15 transition-colors"
             >
               <LogOut size={16} />
               Cerrar sesión

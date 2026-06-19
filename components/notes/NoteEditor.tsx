@@ -185,7 +185,7 @@ export function NoteEditor({ note, folders }: Props) {
         {!showDeleteConfirm ? (
           <button
             onClick={() => setShowDeleteConfirm(true)}
-            className="p-2 rounded-lg hover:bg-red-50 text-[var(--color-gray-mid)] hover:text-red-500 transition-colors"
+            className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/15 text-[var(--color-gray-mid)] hover:text-red-500 transition-colors"
             aria-label="Eliminar nota"
           >
             <Trash2 size={16} />

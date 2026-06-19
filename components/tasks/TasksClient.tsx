@@ -24,26 +24,26 @@ const QUADRANTS: { id: TaskQuadrant; label: string; color: string; bg: string }[
   {
     id: 'urgent_important',
     label: 'Hacer ahora',
-    color: 'text-red-600',
-    bg: 'bg-red-50 border-red-200',
+    color: 'text-red-600 dark:text-red-400',
+    bg: 'bg-red-50 border-red-200 dark:bg-red-500/10 dark:border-red-500/25',
   },
   {
     id: 'not_urgent_important',
     label: 'Planificar',
-    color: 'text-[#67b31f]',
-    bg: 'bg-[#67b31f0d] border-[#67b31f33]',
+    color: 'text-[#67b31f] dark:text-[var(--color-primary-light)]',
+    bg: 'bg-[#67b31f0d] border-[#67b31f33] dark:bg-[#67b31f1a] dark:border-[#67b31f40]',
   },
   {
     id: 'urgent_not_important',
     label: 'Delegar',
-    color: 'text-yellow-600',
-    bg: 'bg-yellow-50 border-yellow-200',
+    color: 'text-yellow-600 dark:text-yellow-400',
+    bg: 'bg-yellow-50 border-yellow-200 dark:bg-yellow-500/10 dark:border-yellow-500/25',
   },
   {
     id: 'not_urgent_not_important',
     label: 'Eliminar',
-    color: 'text-gray-500',
-    bg: 'bg-gray-50 border-gray-200',
+    color: 'text-gray-500 dark:text-[var(--color-text-soft)]',
+    bg: 'bg-gray-50 border-gray-200 dark:bg-white/5 dark:border-[var(--color-gray-border)]',
   },
 ];
 

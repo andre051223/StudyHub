@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Habilita la variante `dark:` de Tailwind ligada a nuestro atributo de tema
+   (data-theme="dark"), en lugar de prefers-color-scheme. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @theme {
   --color-primary: #67b31f;
   --color-primary-dark: #5a9e1b;
@@ -12,6 +16,9 @@
 }
 
 :root {
+  /* Renderiza los controles nativos (select/option, date, scrollbar, autofill)
+     con la paleta clara por defecto. */
+  color-scheme: light;
   --color-primary: #67b31f;
   --color-primary-dark: #5a9e1b;
   --color-primary-light: #7cc934;
@@ -36,6 +43,9 @@
 /* Tema oscuro: redefine las variables dependientes del tema.
    El verde primario se mantiene como color de marca. */
 html[data-theme="dark"] {
+  /* Hace que el navegador pinte los dropdowns de <select>, los date pickers,
+     la barra de scroll y el autocompletado con su variante oscura. */
+  color-scheme: dark;
   --color-gray-light: #1e2532;
   --color-gray-mid: #9aa3b2;
   --color-gray-border: #2d3543;

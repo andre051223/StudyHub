@@ -93,7 +93,7 @@ export function StudyGoals({ sessions, dailyGoal: initialDaily, weeklyGoal: init
     <div className="space-y-5">
       {/* Streak banner */}
       <div className="flex items-center gap-3 bg-[var(--color-gray-light)] rounded-xl p-4">
-        <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
+        <div className="w-10 h-10 rounded-full bg-orange-100 dark:bg-orange-500/15 flex items-center justify-center flex-shrink-0">
           <Flame size={20} className="text-orange-500" />
         </div>
         <div>

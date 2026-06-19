@@ -126,8 +126,8 @@ export default async function DashboardPage() {
                 <span
                   className={`text-xs px-2 py-1 rounded-full ${
                     s.completed_at
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-gray-100 text-gray-500'
+                      ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400'
+                      : 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-[var(--color-text-soft)]'
                   }`}
                 >
                   {s.completed_at ? 'Completada' : 'Abandonada'}
@@ -151,15 +151,21 @@ function StatCard({
   color: 'blue' | 'green' | 'orange';
 }) {
   const colors = {
-    blue: 'bg-blue-50 text-blue-600',
-    green: 'bg-[#67b31f1a] text-[#67b31f]',
-    orange: 'bg-orange-50 text-orange-600',
+    blue: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
+    green: 'bg-[#67b31f1a] text-[#67b31f] dark:text-[var(--color-primary-light)]',
+    orange: 'bg-orange-50 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400',
   };
+
+  // Toma solo las clases de texto (text-* y su variante dark:), no el fondo.
+  const textColor = colors[color]
+    .split(' ')
+    .filter((c) => c.includes('text-'))
+    .join(' ');
 
   return (
     <div className="bg-[var(--color-surface)] rounded-xl p-5 shadow-[var(--shadow-card)]">
       <p className="text-sm text-[var(--color-text-soft)] mb-1">{label}</p>
-      <p className={`text-3xl font-bold ${colors[color].split(' ')[1]}`}>{value}</p>
+      <p className={`text-3xl font-bold ${textColor}`}>{value}</p>
     </div>
   );
 }
@@ -178,9 +184,9 @@ function QuickCard({
   color: 'blue' | 'green' | 'orange';
 }) {
   const colors = {
-    blue: 'bg-blue-50 text-blue-600',
-    green: 'bg-[#67b31f1a] text-[#67b31f]',
-    orange: 'bg-orange-50 text-orange-600',
+    blue: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
+    green: 'bg-[#67b31f1a] text-[#67b31f] dark:text-[var(--color-primary-light)]',
+    orange: 'bg-orange-50 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400',
   };
 
   return (

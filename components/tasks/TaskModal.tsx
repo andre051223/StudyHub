@@ -25,10 +25,10 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 const QUADRANT_OPTIONS = [
-  { value: 'urgent_important', label: 'Hacer ahora', color: 'text-red-600 bg-red-50' },
-  { value: 'not_urgent_important', label: 'Planificar', color: 'text-[#67b31f] bg-[#67b31f1a]' },
-  { value: 'urgent_not_important', label: 'Delegar', color: 'text-yellow-600 bg-yellow-50' },
-  { value: 'not_urgent_not_important', label: 'Eliminar', color: 'text-gray-500 bg-gray-100' },
+  { value: 'urgent_important', label: 'Hacer ahora', color: 'text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-500/15' },
+  { value: 'not_urgent_important', label: 'Planificar', color: 'text-[#67b31f] bg-[#67b31f1a] dark:text-[var(--color-primary-light)]' },
+  { value: 'urgent_not_important', label: 'Delegar', color: 'text-yellow-600 bg-yellow-50 dark:text-yellow-400 dark:bg-yellow-500/15' },
+  { value: 'not_urgent_not_important', label: 'Eliminar', color: 'text-gray-500 bg-gray-100 dark:text-[var(--color-text-soft)] dark:bg-white/10' },
 ];
 
 interface Props {
@@ -242,7 +242,7 @@ export function TaskModal({ task, defaultQuadrant, categories, onSave, onDelete,
               <button
                 type="button"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg transition-colors"
               >
                 <Trash2 size={15} />
                 Eliminar

@@ -66,7 +66,7 @@ export function CategoryList({ categories, onEdit, onDeleted }: Props) {
             <button
               onClick={() => handleDelete(cat)}
               disabled={deletingId === cat.id}
-              className="p-1.5 text-[var(--color-gray-mid)] hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40"
+              className="p-1.5 text-[var(--color-gray-mid)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg transition-colors disabled:opacity-40"
               aria-label={`Eliminar ${cat.name}`}
             >
               {deletingId === cat.id ? (

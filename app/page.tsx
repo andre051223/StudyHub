@@ -73,7 +73,7 @@ export default function LandingPage() {
               icon={BookOpen}
               title="Toma notas con tu propio editor"
               desc="Escribe apuntes con formato, código, imágenes y listas de tareas. Autoguardado incluido."
-              colorClass="bg-blue-50 text-blue-600"
+              colorClass="bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400"
             />
             <FeatureCard
               icon={CheckSquare}
@@ -85,7 +85,7 @@ export default function LandingPage() {
               icon={Timer}
               title="Temporizador Pomodoro"
               desc="Sesiones de estudio con modo simple o Pomodoro. Historial y estadísticas."
-              colorClass="bg-orange-50 text-orange-600"
+              colorClass="bg-orange-50 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400"
             />
           </div>
         </div>
