@@ -31,7 +31,14 @@ export default function ForgotPasswordPage() {
     });
 
     if (error) {
-      toast.error('No se pudo enviar el correo. Intenta de nuevo en unos minutos.');
+      console.error('resetPasswordForEmail:', error.status, error.code, error.message);
+      if (error.code === 'over_email_send_rate_limit') {
+        toast.error('Ya solicitaste un enlace hace poco. Espera 60 segundos e intenta de nuevo.');
+      } else if (error.status === 429) {
+        toast.error('Se alcanzó el límite de correos por hora. Intenta más tarde.');
+      } else {
+        toast.error(`No se pudo enviar el correo: ${error.message}`);
+      }
       return;
     }
 
