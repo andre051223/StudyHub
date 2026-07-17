@@ -1,5 +1,25 @@
 import Link from 'next/link';
-import { BookOpen, CheckSquare, Timer, ArrowRight } from 'lucide-react';
+import {
+  BookOpen,
+  CheckSquare,
+  Timer,
+  ArrowRight,
+  Type,
+  Code2,
+  ListChecks,
+  Save,
+  FolderOpen,
+  LayoutGrid,
+  MousePointer2,
+  Filter,
+  Palette,
+  PictureInPicture2,
+  BarChart3,
+  Target,
+} from 'lucide-react';
+import { ThemeToggle } from '@/components/shared/ThemeToggle';
+import { ShowcaseSection } from '@/components/landing/ShowcaseSection';
+import { NotesMockup, KanbanMockup, TimerMockup } from '@/components/landing/mockups';
 
 export default function LandingPage() {
   return (
@@ -13,6 +33,7 @@ export default function LandingPage() {
           <span className="font-bold text-xl text-[var(--color-text)]">StudyHub</span>
         </div>
         <div className="flex items-center gap-3">
+          <ThemeToggle />
           <Link
             href="/login"
             className="px-4 py-2 text-sm font-medium text-[var(--color-text-soft)] hover:text-[var(--color-primary)] transition-colors"
@@ -88,6 +109,78 @@ export default function LandingPage() {
             />
           </div>
         </div>
+      </section>
+
+      {/* Showcase: Notas */}
+      <ShowcaseSection
+        id="notas"
+        badge="Notas"
+        icon={BookOpen}
+        accent="blue"
+        title="Apuntes con un editor de verdad"
+        description="Escribe tus apuntes de clase con un editor enriquecido pensado para estudiar: formato completo, código, imágenes y listas de tareas, todo guardado automáticamente mientras escribes."
+        bullets={[
+          { icon: Type, text: 'Formato completo: títulos, listas, citas y enlaces' },
+          { icon: Code2, text: 'Bloques de código con resaltado de sintaxis' },
+          { icon: ListChecks, text: 'Imágenes y listas de tareas dentro de la nota' },
+          { icon: Save, text: 'Autoguardado automático mientras escribes' },
+          { icon: FolderOpen, text: 'Organización por carpetas y etiquetas' },
+        ]}
+        visual={<NotesMockup />}
+      />
+
+      {/* Showcase: Tareas */}
+      <ShowcaseSection
+        id="tareas"
+        badge="Tareas"
+        icon={CheckSquare}
+        accent="green"
+        soft
+        reverse
+        title="Prioriza con la matriz de Eisenhower"
+        description="Organiza tus pendientes en un tablero visual por urgencia e importancia. Arrastra cada tarea al cuadrante que le corresponde y enfócate primero en lo que de verdad importa."
+        bullets={[
+          { icon: LayoutGrid, text: 'Cuatro cuadrantes: Hacer ahora, Planificar, Delegar y Eliminar' },
+          { icon: MousePointer2, text: 'Arrastra y suelta tarjetas entre cuadrantes' },
+          { icon: Filter, text: 'Filtros por categoría y estado' },
+          { icon: Palette, text: 'Categorías con colores personalizados' },
+        ]}
+        visual={<KanbanMockup />}
+      />
+
+      {/* Showcase: Tiempo de estudio */}
+      <ShowcaseSection
+        id="tiempo"
+        badge="Tiempo de estudio"
+        icon={Timer}
+        accent="orange"
+        title="Mide y mejora tus sesiones"
+        description="Cronometra tus sesiones de estudio, revisa tu historial y sigue tu progreso con estadísticas, metas y rachas que te motivan a mantener el ritmo."
+        bullets={[
+          { icon: Timer, text: 'Temporizador de 10 a 120 minutos o cronómetro libre' },
+          { icon: PictureInPicture2, text: 'Mini-timer flotante Picture-in-Picture' },
+          { icon: BarChart3, text: 'Estadísticas: minutos por día, distribución y racha' },
+          { icon: Target, text: 'Metas diarias y semanales de estudio' },
+        ]}
+        visual={<TimerMockup />}
+      />
+
+      {/* CTA final */}
+      <section className="px-6 py-20 bg-[var(--color-surface-soft)] text-center">
+        <h2 className="text-3xl font-bold text-[var(--color-text)] mb-4">
+          Empieza a estudiar mejor hoy
+        </h2>
+        <p className="text-[var(--color-text-soft)] max-w-xl mx-auto mb-8 leading-relaxed">
+          StudyHub es gratis y puedes instalarlo como app en tu computador o celular.
+          Crea tu cuenta y organiza tu semestre en minutos.
+        </p>
+        <Link
+          href="/register"
+          className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--color-primary)] text-white font-semibold rounded-xl hover:bg-[var(--color-primary-dark)] transition-all hover:-translate-y-0.5"
+        >
+          Registrarse gratis
+          <ArrowRight size={18} />
+        </Link>
       </section>
 
       <footer className="border-t border-[var(--color-gray-border)] px-6 py-6 text-center text-sm text-[var(--color-gray-mid)]">
