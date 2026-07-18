@@ -12,8 +12,11 @@ function getSupabaseConfig(): { url: string; anonKey: string } {
 
   if (!url || !anonKey || url.includes('your-project-id')) {
     throw new Error(
-      'Configuración de Supabase ausente en el cliente. Verifica NEXT_PUBLIC_SUPABASE_URL y ' +
-        'NEXT_PUBLIC_SUPABASE_ANON_KEY en .env.local y reinicia el servidor (o vuelve a hacer build).'
+      'Faltan las variables de entorno de Supabase (NEXT_PUBLIC_SUPABASE_URL y ' +
+        'NEXT_PUBLIC_SUPABASE_ANON_KEY). En local: defínelas en .env.local y reinicia el ' +
+        'servidor. En el despliegue (Vercel/Netlify/etc.): configúralas en el panel de ' +
+        'variables de entorno del proyecto y vuelve a desplegar, ya que .env.local NO se sube ' +
+        'al repositorio y Next.js incrusta estas variables durante el build.'
     );
   }
 
