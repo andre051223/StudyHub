@@ -1,11 +1,8 @@
 # StudyHub
 
-> Plataforma web full-stack para estudiantes universitarios que centraliza notas con editor enriquecido, gestión de tareas en matriz Eisenhower y temporizador de estudio con estadísticas.
+> Plataforma web full-stack para estudiantes y autodidactas que centraliza tres herramientas del flujo de estudio diario: notas con editor enriquecido, gestión de tareas en la Matriz de Eisenhower y temporizador de estudio con estadísticas.
 
-**Asignatura:** Desarrollo Web  
-**Institución:** Fundación Universitaria del Área Andina  
-**Autor:** Diego  
-**Fecha de entrega:** 1 de Junio de 2026
+La app está en español, su color de marca es el verde `#67b31f`, e incluye modo claro/oscuro y capacidades PWA (instalable, service worker).
 
 ---
 
@@ -29,13 +26,13 @@
 
 ## Descripción general
 
-StudyHub es una aplicación web construida con **Next.js** y **Supabase** que integra en una sola plataforma las herramientas que un estudiante universitario necesita en su día a día:
+StudyHub es una aplicación web construida con **Next.js 16** y **Supabase** que integra en una sola plataforma las herramientas que un estudiante necesita en su día a día:
 
-- **Notas** con editor de texto enriquecido (Tiptap), organización en carpetas y sistema de etiquetas.
-- **Tareas** organizadas en la Matriz de Eisenhower con tablero Kanban y drag & drop.
-- **Temporizador** Pomodoro y libre con historial de sesiones y estadísticas visuales.
+- **Notas** con editor de texto enriquecido (Tiptap), organización en carpetas, sistema de etiquetas y búsqueda full-text en español.
+- **Tareas** organizadas en la Matriz de Eisenhower con tablero Kanban de 4 cuadrantes y drag & drop.
+- **Temporizador** de estudio en modo simple (cuenta regresiva) o cronómetro (stopwatch), con historial de sesiones, estadísticas visuales y metas diarias/semanales.
 
-Todo con autenticación segura, datos aislados por usuario mediante Row Level Security, diseño responsivo y una capa completa de servicios web **REST** y **SOAP** que expone la lógica de negocio como API consumible desde cualquier cliente.
+Se apoya en un **dashboard** de resumen, **categorías/materias** compartidas entre tareas y sesiones, **modo claro/oscuro**, y capacidades **PWA**. Todo con autenticación segura, datos aislados por usuario mediante Row Level Security, diseño responsivo y una capa completa de servicios web **REST** y **SOAP** que expone la lógica de negocio como API consumible desde cualquier cliente.
 
 ---
 
@@ -43,19 +40,23 @@ Todo con autenticación segura, datos aislados por usuario mediante Row Level Se
 
 | Capa | Tecnología | Versión | Justificación |
 |------|-----------|---------|---------------|
-| Framework | Next.js + App Router | 16 | SSR, Server Components, Route Handlers nativos para la API REST |
+| Framework | Next.js + App Router | 16.2.4 | SSR, Server Components, Route Handlers nativos para la API REST |
+| Runtime UI | React | 19.2.4 | Server Components por defecto |
 | Lenguaje | TypeScript | 5.x | Seguridad de tipos en compilación, mejor mantenibilidad |
-| Estilos | Tailwind CSS | v4 | Utilidades atómicas, sin CSS extra, purging automático |
+| Estilos | Tailwind CSS | v4 | Configuración vía `@theme` en `globals.css` (sin `tailwind.config.ts`) |
 | Base de datos | Supabase (PostgreSQL) | — | BaaS completo: DB, Auth y Storage en un solo servicio |
-| Autenticación | Supabase Auth | — | Integrado con RLS, JWT seguro por defecto |
+| Autenticación | Supabase Auth (`@supabase/ssr`) | — | Integrado con RLS, JWT seguro por defecto |
 | Editor rich text | Tiptap | 3 | Extensible, basado en ProseMirror, accesible |
-| Gráficas | Recharts | — | API declarativa, compatible con React 19 |
-| Drag & drop | dnd-kit | — | Accesible, optimizado para web, sin dependencias |
+| Resaltado de código | lowlight | — | Usado por CodeBlockLowlight |
+| Gráficas | Recharts | 3 | API declarativa, compatible con React 19 |
+| Drag & drop | @dnd-kit | — | Accesible, optimizado para web |
+| Iconos | lucide-react | — | Set de iconos consistente |
 | Validación | Zod | v4 | Type-safe, integración directa con react-hook-form |
-| Formularios | react-hook-form | — | Sin re-renders innecesarios, API sencilla |
-| Fechas | date-fns | — | Modular y tree-shakeable, sin clases |
+| Formularios | react-hook-form | 7 | Sin re-renders innecesarios, API sencilla |
+| Fechas | date-fns | 4 | Modular y tree-shakeable |
 | Toasts | Sonner | — | Minimalista, accesible, cero configuración |
-| **Servicios SOAP** | **node-soap** | — | **Servidor y cliente SOAP 1.1 para Node.js** |
+| **Servicios SOAP** | **node-soap** | — | **Servidor SOAP 1.1 de solo lectura para Node.js** |
+| Utilidades CSS | clsx + tailwind-merge | — | Helper `cn()` en `lib/utils.ts` |
 
 ---
 
@@ -71,11 +72,11 @@ StudyHub implementa el patrón **Modelo — Vista — Controlador** aprovechando
 │  components/  — Client Components React con "use client"            │
 │  ├── tasks/TasksClient.tsx   ← tablero Kanban Eisenhower            │
 │  ├── notes/NotesClient.tsx   ← lista de notas con filtros           │
-│  ├── timer/TimerClient.tsx   ← temporizador SVG circular            │
-│  └── shared/CategoriesClient.tsx  ← CRUD de categorías             │
+│  ├── timer/TimerClient.tsx   ← temporizador (simple / stopwatch)   │
+│  └── categories/CategoriesClient.tsx  ← CRUD de categorías        │
 └──────────────────────┬──────────────────────────────────────────────┘
-                       │ llamadas directas a Supabase (Client SDK)
-                       │ o fetch a /api/* (REST)
+                       │ fetch a /api/* (REST) o Server Actions
+                       │ / cliente Supabase (browser) para auth e imágenes
 ┌──────────────────────▼──────────────────────────────────────────────┐
 │               CONTROLADOR / API LAYER (Controller)                  │
 │                                                                     │
@@ -91,13 +92,14 @@ StudyHub implementa el patrón **Modelo — Vista — Controlador** aprovechando
 │  ├── sessions/route.ts         GET · POST                           │
 │  └── soap/route.ts             GET (WSDL) · POST (envelope XML)     │
 │                                                                     │
+│  app/(app)/categories/actions.ts  — Server Actions de categorías  │
 │  lib/api/helpers.ts  — getAuthContext() · ok() · err()             │
 └──────────────────────┬──────────────────────────────────────────────┘
                        │ instancia y llama métodos
 ┌──────────────────────▼──────────────────────────────────────────────┐
 │                     MODELO (Model / DAO)                            │
 │  lib/models/                                                        │
-│  ├── BaseModel.ts        ← clase abstracta con handleError()        │
+│  ├── BaseModel.ts        ← clase base + ModelError                  │
 │  ├── CategoryModel.ts    ← CRUD + validación nombre y color         │
 │  ├── TaskModel.ts        ← CRUD + subtareas + posición en kanban    │
 │  ├── NoteModel.ts        ← CRUD + búsqueda full-text               │
@@ -120,6 +122,7 @@ StudyHub implementa el patrón **Modelo — Vista — Controlador** aprovechando
 | **Vista** | `components/` — Client Components con `"use client"` | React + react-hook-form |
 | **Controlador REST** | `app/api/` — Route Handlers HTTP | Next.js App Router |
 | **Controlador SOAP** | `app/api/soap/route.ts` + WSDL | node-soap |
+| **Server Actions** | `app/(app)/categories/actions.ts` | Next.js Server Actions |
 | **Modelo** | `lib/models/` — clases con responsabilidad única | TypeScript + Supabase JS |
 | **Patrón DAO** | Cada Model encapsula todo acceso a su tabla | Clase con métodos CRUD |
 
@@ -128,10 +131,10 @@ StudyHub implementa el patrón **Modelo — Vista — Controlador** aprovechando
 ```
 1. Cliente HTTP hace POST /api/tasks  con body JSON
 2. Route Handler verifica sesión con getAuthContext()
-3. Handler instancia TaskModel(supabase)
+3. Handler valida el body con Zod e instancia TaskModel(supabase)
 4. TaskModel.create() valida y aplica reglas de negocio
 5. Inserta en Supabase; RLS confirma user_id = auth.uid()
-6. Handler responde 201 con la tarea creada en JSON
+6. Handler responde con ok(data) — la tarea creada en JSON
 ```
 
 **Flujo de una petición SOAP (ejemplo: GetTaskStats):**
@@ -200,7 +203,7 @@ Valores válidos para `quadrant`: `urgent_important` · `not_urgent_important` �
 | Método | Ruta | Descripción |
 |--------|------|-------------|
 | `GET` | `/api/notes` | Lista todas las notas (sin `content` completo) |
-| `GET` | `/api/notes?q=término` | Búsqueda en título y texto de notas |
+| `GET` | `/api/notes?q=término` | Búsqueda full-text (español) en título y texto de notas |
 | `POST` | `/api/notes` | Crea una nota vacía o con contenido inicial |
 | `GET` | `/api/notes/:id` | Nota completa con `content` JSON de Tiptap |
 | `PATCH` | `/api/notes/:id` | Actualiza contenido, tags o carpeta |
@@ -220,7 +223,7 @@ Valores válidos para `quadrant`: `urgent_important` · `not_urgent_important` �
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| `GET` | `/api/sessions` | Historial de sesiones (últimas 50) con categoría |
+| `GET` | `/api/sessions` | Historial de sesiones con categoría |
 | `POST` | `/api/sessions` | Registra una sesión completada o abandonada |
 
 **POST `/api/sessions` — body:**
@@ -228,13 +231,14 @@ Valores válidos para `quadrant`: `urgent_important` · `not_urgent_important` �
 {
   "duration_minutes": 25,
   "actual_duration_seconds": 1487,
-  "mode": "pomodoro",
-  "pomodoro_cycles_completed": 1,
+  "mode": "simple",
   "started_at": "2026-05-16T14:00:00Z",
   "completed_at": "2026-05-16T14:24:47Z",
   "category_id": "uuid-aqui"
 }
 ```
+
+Valores válidos para `mode`: `simple` · `stopwatch` (`pomodoro` se conserva solo por compatibilidad con sesiones antiguas).
 
 #### Respuestas de error
 
@@ -252,7 +256,7 @@ Valores válidos para `quadrant`: `urgent_important` · `not_urgent_important` �
 
 ### API SOAP
 
-El servicio SOAP expone operaciones de **consulta y estadísticas** reutilizando la misma capa de modelos que el REST. Sigue el protocolo **SOAP 1.1** con estilo `document/literal`.
+El servicio SOAP expone operaciones de **consulta y estadísticas** (solo lectura) reutilizando la misma capa de modelos que el REST. Sigue el protocolo **SOAP 1.1** con estilo `document/literal`.
 
 #### Endpoints
 
@@ -395,93 +399,85 @@ curl -X POST http://localhost:3000/api/soap \
 ```
 studyhub/
 ├── app/
-│   ├── (auth)/
-│   │   ├── login/              # Página de inicio de sesión
-│   │   └── register/           # Página de registro
-│   ├── (app)/
-│   │   ├── dashboard/          # Resumen: notas recientes, tareas pendientes, sesiones
-│   │   ├── notes/              # Lista de notas con carpetas y tags
-│   │   ├── notes/[noteId]/     # Editor individual de nota (Tiptap)
-│   │   ├── tasks/              # Kanban Eisenhower con drag & drop
-│   │   ├── timer/              # Temporizador + historial + estadísticas
-│   │   ├── categories/         # CRUD de categorías
-│   │   └── profile/            # Perfil y configuración de usuario
-│   ├── api/                    # ← Capa de servicios web (REST + SOAP)
-│   │   ├── categories/
-│   │   │   ├── route.ts        # GET /api/categories · POST /api/categories
-│   │   │   └── [id]/route.ts   # GET · PATCH · DELETE /api/categories/:id
-│   │   ├── tasks/
-│   │   │   ├── route.ts        # GET /api/tasks · POST /api/tasks
-│   │   │   └── [id]/route.ts   # GET · PATCH · DELETE /api/tasks/:id
-│   │   ├── notes/
-│   │   │   ├── route.ts        # GET /api/notes(?q=) · POST /api/notes
-│   │   │   └── [id]/route.ts   # GET · PATCH · DELETE /api/notes/:id
-│   │   ├── folders/
-│   │   │   ├── route.ts        # GET /api/folders · POST /api/folders
-│   │   │   └── [id]/route.ts   # GET · PATCH · DELETE /api/folders/:id
-│   │   ├── sessions/
-│   │   │   └── route.ts        # GET /api/sessions · POST /api/sessions
-│   │   └── soap/
-│   │       └── route.ts        # GET /api/soap (WSDL) · POST /api/soap (envelope)
-│   ├── layout.tsx              # Layout raíz con fuentes y providers
-│   └── globals.css             # Variables CSS y reset global
+│   ├── (auth)/                       # Rutas públicas de autenticación
+│   │   ├── login/                    # Inicio de sesión
+│   │   ├── register/                 # Registro
+│   │   ├── forgot-password/          # Solicitud de recuperación por email
+│   │   └── reset-password/           # Restablecimiento de contraseña
+│   ├── (app)/                        # Rutas protegidas (requieren sesión)
+│   │   ├── layout.tsx                # Guard de sesión (redirect a /login) + Navbar
+│   │   ├── dashboard/                # Resumen: notas, tareas y sesiones
+│   │   ├── notes/                    # Lista de notas con carpetas y tags
+│   │   ├── notes/[noteId]/           # Editor individual de nota (Tiptap)
+│   │   ├── tasks/                    # Kanban Eisenhower con drag & drop
+│   │   ├── timer/                    # Temporizador + historial + estadísticas + metas
+│   │   ├── categories/              # CRUD de categorías (page.tsx + actions.ts)
+│   │   └── profile/                  # Perfil de usuario
+│   ├── api/                          # ← Capa de servicios web (REST + SOAP)
+│   │   ├── categories/               # route.ts · [id]/route.ts
+│   │   ├── tasks/                    # route.ts · [id]/route.ts
+│   │   ├── notes/                    # route.ts · [id]/route.ts
+│   │   ├── folders/                  # route.ts · [id]/route.ts
+│   │   ├── sessions/route.ts         # GET · POST
+│   │   └── soap/route.ts             # GET (WSDL) · POST (envelope)
+│   ├── icons/                        # icon-192, icon-512 (rutas dinámicas PWA)
+│   ├── icon.tsx / apple-icon.tsx     # Favicons generados
+│   ├── manifest.ts                   # Web App Manifest (PWA)
+│   ├── layout.tsx                    # Layout raíz (theme init, fuente, Toaster, SW)
+│   ├── page.tsx                      # Landing pública
+│   └── globals.css                   # Tokens de tema (@theme) + estilos Tiptap
 │
 ├── components/
-│   ├── notes/
-│   │   ├── NoteEditor.tsx      # Editor Tiptap con toolbar completa
-│   │   └── NotesClient.tsx     # Lista de notas, filtros y carpetas
-│   ├── tasks/
-│   │   ├── KanbanColumn.tsx    # Columna droppable del kanban
-│   │   ├── TaskCard.tsx        # Tarjeta draggable de tarea
-│   │   ├── TaskModal.tsx       # Modal de detalle con subtareas y deadline
-│   │   └── TasksClient.tsx     # Orquestador del tablero Eisenhower
-│   ├── timer/
-│   │   ├── TimerClient.tsx     # Temporizador SVG circular, modos Simple y Pomodoro
-│   │   ├── SessionHistory.tsx  # Historial de sesiones completadas
-│   │   └── StudyStats.tsx      # Gráfico de barras diario + torta por categoría
-│   └── shared/
-│       ├── Navbar.tsx          # Barra de navegación lateral responsiva
-│       ├── CategoriesClient.tsx# Formulario y lista de categorías
-│       └── ProfileClient.tsx   # Formulario de perfil de usuario
+│   ├── landing/                      # ShowcaseSection, mockups
+│   ├── notes/                        # NoteEditor, NotesClient
+│   ├── tasks/                        # TasksClient, KanbanColumn, TaskCard, TaskModal
+│   ├── timer/                        # TimerClient, MiniTimer, SessionHistory, StudyStats, StudyGoals
+│   ├── categories/                   # CategoriesClient, CategoryForm, CategoryList
+│   └── shared/                       # Navbar, ThemeToggle, ProfileClient, ServiceWorkerRegistrar
 │
 ├── lib/
 │   ├── supabase/
-│   │   ├── client.ts           # Cliente Supabase para componentes cliente
-│   │   ├── server.ts           # Cliente Supabase para Server Components / Route Handlers
-│   │   └── middleware.ts       # Cliente Supabase para middleware
-│   ├── models/                 # ← Capa de Modelos (patrón MVC/DAO)
-│   │   ├── BaseModel.ts        # Clase abstracta base con manejo de errores
-│   │   ├── CategoryModel.ts    # DAO de categorías: CRUD + reglas de negocio
-│   │   ├── TaskModel.ts        # DAO de tareas: CRUD + subtareas + posición kanban
-│   │   ├── NoteModel.ts        # DAO de notas: CRUD + búsqueda full-text
-│   │   ├── FolderModel.ts      # DAO de carpetas: CRUD + orphan cleanup
-│   │   ├── SessionModel.ts     # DAO de sesiones: CRUD + cálculo de estadísticas
-│   │   └── index.ts            # Barrel export de todos los modelos
-│   ├── services/               # ← Capa de servicios SOAP
-│   │   └── StudyHubSoapService.ts  # Operaciones: GetCategories, GetTaskStats, GetStudyStats
+│   │   ├── client.ts                 # Cliente para Client Components (browser)
+│   │   ├── server.ts                 # Cliente para Server Components / Route Handlers
+│   │   └── middleware.ts             # updateSession(): refresco de sesión + guard de rutas
+│   ├── models/                       # ← Capa de Modelos (patrón MVC/DAO)
+│   │   ├── BaseModel.ts              # Clase base + ModelError
+│   │   ├── CategoryModel.ts          # DAO de categorías: CRUD + reglas de negocio
+│   │   ├── TaskModel.ts              # DAO de tareas: CRUD + subtareas + posición kanban
+│   │   ├── NoteModel.ts              # DAO de notas: CRUD + búsqueda full-text
+│   │   ├── FolderModel.ts            # DAO de carpetas: CRUD + orphan cleanup
+│   │   ├── SessionModel.ts           # DAO de sesiones: CRUD + racha y estadísticas
+│   │   └── index.ts                  # Barrel export de modelos y tipos Create/Update
+│   ├── services/                     # ← Capa de servicios SOAP
+│   │   └── StudyHubSoapService.ts    # GetCategories, GetTaskStats, GetStudyStats
 │   ├── api/
-│   │   └── helpers.ts          # getAuthContext() · ok() · err() — compartidos por Route Handlers
-│   ├── types.ts                # Interfaces y tipos TypeScript compartidos
-│   └── utils.ts                # Utilidades: cn(), formatDate(), formatDuration()
+│   │   └── helpers.ts                # getAuthContext() · ok() · err()
+│   ├── types.ts                      # Interfaces y tipos TypeScript compartidos
+│   └── utils.ts                      # cn() y utilidades
 │
 ├── types/
-│   └── node-soap.d.ts          # Declaraciones TypeScript para node-soap
+│   └── node-soap.d.ts                # Declaraciones TypeScript para node-soap
 │
 ├── public/
-│   ├── studyhub.wsdl           # Definición WSDL del servicio SOAP
+│   ├── studyhub.wsdl                 # Definición WSDL del servicio SOAP
 │   └── sounds/
-│       └── bell.mp3            # Sonido de notificación del temporizador
+│       └── bell.wav                  # Sonido de notificación del temporizador
 │
 ├── supabase/
 │   └── migrations/
-│       ├── 001_initial.sql     # Esquema completo de la base de datos
-│       └── 002_categories_constraints.sql  # Constraints y RLS granular
+│       ├── 001_initial.sql                   # Esquema completo de la base de datos
+│       ├── 002_categories_constraints.sql    # Constraints y RLS granular en categories
+│       ├── 003_user_goals.sql                # Metas diaria/semanal en profiles
+│       └── 004_stopwatch_mode.sql            # Modo stopwatch en study_sessions
 │
-├── middleware.ts               # Protección de rutas y refresco de sesión
-├── .env.local                  # Variables de entorno (no incluido en el repo)
 ├── .env.example                # Plantilla de variables de entorno
 └── next.config.ts              # Configuración de Next.js
 ```
+
+> **Nota:** no hay `middleware.ts` en la raíz ni `tailwind.config.ts`. El guard de rutas
+> efectivo se realiza en el Server Component `app/(app)/layout.tsx`; el helper
+> `lib/supabase/middleware.ts` (`updateSession`) implementa refresco de sesión + guard y
+> queda disponible para cablearse en un `middleware.ts` raíz si se necesita.
 
 ---
 
@@ -489,14 +485,15 @@ studyhub/
 
 ### Notas
 
-Permite crear, editar y organizar notas académicas con formato enriquecido.
+Permite crear, editar y organizar notas con formato enriquecido.
 
 **Funcionalidades:**
-- Editor Tiptap con toolbar completa: negrita, cursiva, encabezados H1–H3, código en línea, bloques de código, cita, listas ordenadas/desordenadas, checklists e imágenes.
-- Organización en **carpetas** con contador de notas por carpeta.
+- Editor Tiptap con toolbar completa: negrita, cursiva, encabezados H1–H3, código en línea, bloques de código con resaltado (lowlight), listas ordenadas/desordenadas, checklists (TaskList), enlaces e imágenes.
+- Organización en **carpetas** con contador de notas por carpeta (notas sin carpeta = "Inbox").
 - Sistema de **tags** con filtro por chip seleccionable.
-- **Autoguardado** con debounce de 1 segundo (sin botón de guardar explícito).
-- Subida de imágenes directamente a **Supabase Storage**.
+- **Búsqueda full-text en español** sobre título y texto plano de la nota (`content_text`).
+- **Autoguardado** con debounce (sin botón de guardar explícito) e indicador Guardado/Guardando.
+- Subida de imágenes directamente a **Supabase Storage** (bucket `notes-images`).
 
 ---
 
@@ -512,8 +509,8 @@ Organiza tareas según urgencia e importancia en un tablero Kanban de 4 cuadrant
 | Eliminar | No urgente + No importante | Descartar |
 
 **Funcionalidades:**
-- **Drag & drop** entre columnas con dnd-kit.
-- **Modal de detalle** con subtareas anidadas, fecha límite (deadline) y categoría.
+- **Drag & drop** entre columnas con @dnd-kit (actualiza `quadrant` y `position`).
+- **Modal de detalle** con subtareas anidadas, fecha límite (deadline) y categoría (creable inline).
 - Filtro por categoría y toggle para mostrar/ocultar tareas completadas.
 - **Actualizaciones optimistas** para experiencia fluida sin esperar respuesta del servidor.
 
@@ -524,16 +521,25 @@ Organiza tareas según urgencia e importancia en un tablero Kanban de 4 cuadrant
 Registra sesiones de estudio con estadísticas para seguimiento del hábito.
 
 **Modos:**
-- **Simple:** duración libre de 10 a 120 minutos ajustable con slider.
-- **Pomodoro:** ciclos de 25 min trabajo / 5 min descanso corto / 15 min descanso largo.
+- **Simple:** cuenta regresiva de duración libre de 10 a 120 minutos.
+- **Stopwatch:** cronómetro ascendente sin límite fijo.
+
+> El modo **pomodoro** es legado: ya no es seleccionable en la UI, pero se conserva en el enum
+> para mostrar sesiones antiguas.
 
 **Funcionalidades:**
-- Display circular animado en SVG con cuenta regresiva.
-- Estado persistido en `localStorage` para sobrevivir recargas de página.
-- Guarda sesiones completadas o detenidas en Supabase.
-- **Notificaciones sonoras** (Web Audio API con `bell.mp3` como recurso) y **Web Notifications API** (requiere permiso del navegador).
-- **Historial** de sesiones con fecha, duración y categoría.
-- **Estadísticas:** gráfico de barras con minutos por día (últimos 7 días) y gráfico de torta con distribución por categoría.
+- Estado del timer persistido en `localStorage` para sobrevivir recargas; el tiempo se calcula por timestamps (no por contadores) para funcionar en segundo plano.
+- `MiniTimer` para ver el timer activo desde otras vistas.
+- **Notificaciones sonoras** (`public/sounds/bell.wav`) y **Web Notifications API** al completar.
+- **Historial** de sesiones con filtros (fecha, duración, categoría).
+- **Estadísticas** (Recharts): minutos por día, distribución por categoría, racha actual, categoría top del mes y promedio diario.
+- **Metas** diaria y semanal (`StudyGoals`), guardadas en `profiles` (`daily_goal_minutes`, `weekly_goal_minutes`).
+
+---
+
+### Categorías
+
+CRUD de materias/áreas compartidas entre tareas y sesiones (listar, crear, renombrar, recolorear, eliminar). Constraints de unicidad, longitud y color hex a nivel de base de datos. Mutaciones vía Server Actions (`actions.ts`) y/o API REST.
 
 ---
 
@@ -559,9 +565,11 @@ cp .env.example .env.local
 # Editar .env.local con las credenciales de Supabase (ver sección siguiente)
 
 # 4. Ejecutar migraciones en Supabase (en orden)
-# Ir a supabase.com → SQL Editor → pegar y ejecutar:
+# Ir a supabase.com → SQL Editor → pegar y ejecutar en secuencia:
 # supabase/migrations/001_initial.sql
 # supabase/migrations/002_categories_constraints.sql
+# supabase/migrations/003_user_goals.sql
+# supabase/migrations/004_stopwatch_mode.sql
 
 # 5. Iniciar el servidor de desarrollo
 npm run dev
@@ -606,23 +614,25 @@ Las claves se encuentran en el dashboard de Supabase en **Settings → API**.
 
 ## Base de datos
 
-El esquema se construye en dos migraciones ejecutadas en orden:
+El esquema se construye en cuatro migraciones ejecutadas en orden. Todas las tablas tienen **Row Level Security (RLS)** activado: cada usuario solo puede leer y escribir sus propios registros.
 
 ### `001_initial.sql` — Esquema base
 
 | Tabla | Descripción |
 |-------|-------------|
-| `profiles` | Perfil extendido del usuario (nombre, avatar) |
+| `profiles` | Perfil extendido del usuario (creado por trigger `handle_new_user`) |
 | `categories` | Categorías personalizadas con color y nombre |
 | `folders` | Carpetas para organizar notas |
-| `notes` | Notas con contenido JSON (Tiptap), carpeta y tags |
-| `tasks` | Tareas con cuadrante Eisenhower, deadline y estado |
+| `notes` | Notas con contenido JSON (Tiptap), texto plano para búsqueda, carpeta y tags |
+| `tasks` | Tareas con cuadrante Eisenhower, deadline, posición y estado |
 | `subtasks` | Subtareas anidadas dentro de una tarea |
-| `study_sessions` | Sesiones de estudio con duración, tipo y categoría |
+| `study_sessions` | Sesiones de estudio con duración, modo y categoría |
+
+Incluye el índice full-text español `notes_search_idx` (GIN) y el bucket de Storage `notes-images`.
 
 ### `002_categories_constraints.sql` — Integridad y RLS granular
 
-Refuerza la tabla `categories` con las siguientes reglas, alineadas con las que aplica `CategoryModel` en código:
+Refuerza la tabla `categories`, alineado con las reglas que aplica `CategoryModel` en código:
 
 | Constraint | Tipo | Regla |
 |---|---|---|
@@ -630,9 +640,15 @@ Refuerza la tabla `categories` con las siguientes reglas, alineadas con las que 
 | `categories_name_not_empty` | CHECK | `length(trim(name)) >= 2` |
 | `categories_color_hex` | CHECK | El color debe coincidir con `^#[0-9a-fA-F]{6}$` |
 
-Las políticas RLS se reemplazan por cuatro políticas granulares (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) para mayor claridad académica y control fino por operación.
+Reemplaza las políticas RLS por cuatro políticas granulares (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) para control fino por operación.
 
-Todas las tablas tienen **Row Level Security (RLS)** activado: cada usuario solo puede leer y escribir sus propios registros.
+### `003_user_goals.sql` — Metas de estudio
+
+Agrega a `profiles` las columnas `daily_goal_minutes` (default 60, CHECK 5–480) y `weekly_goal_minutes` (default 300, CHECK 30–2400).
+
+### `004_stopwatch_mode.sql` — Modo cronómetro
+
+Amplía el enum `study_mode` para incluir `stopwatch` junto a `simple` y `pomodoro` (legado).
 
 ---
 
@@ -640,8 +656,8 @@ Todas las tablas tienen **Row Level Security (RLS)** activado: cada usuario solo
 
 | Script | Descripción |
 |--------|-------------|
-| `npm run dev` | Servidor de desarrollo con Turbopack |
-| `npm run build` | Build optimizado de producción |
+| `npm run dev` | Servidor de desarrollo (`next dev`) |
+| `npm run build` | Build optimizado de producción (`next build`) |
 | `npm start` | Servidor de producción (requiere build previo) |
 | `npm run lint` | Análisis estático con ESLint |
 
@@ -652,10 +668,10 @@ Todas las tablas tienen **Row Level Security (RLS)** activado: cada usuario solo
 - **RLS en todas las tablas:** los usuarios solo acceden a sus propios datos, incluso con la clave anónima.
 - **Sin secretos en el código:** todas las credenciales se leen desde variables de entorno.
 - **Autenticación en Route Handlers:** cada endpoint REST verifica la sesión con `getAuthContext()` antes de instanciar cualquier modelo.
-- **Validación con Zod** en todos los formularios del cliente y del servidor.
+- **Validación con Zod** en formularios del cliente y en los route handlers del servidor.
 - **`SUPABASE_SERVICE_ROLE_KEY`** solo se usa en Server Components y API Routes; nunca se envía al navegador.
-- **Middleware de sesión** refresca el token automáticamente y protege todas las rutas de `(app)/`.
-- **SOAP sin exposición de credenciales:** el servicio SOAP usa el mismo cliente Supabase server-side; el `userId` del envelope es solo un filtro de consulta, la autorización real viene de la sesión de la cookie.
+- **Guard de rutas:** `app/(app)/layout.tsx` obtiene el usuario y redirige a `/login` si no hay sesión; `lib/supabase/middleware.ts` refresca el token y queda disponible para el guard en el edge.
+- **SOAP sin exposición de credenciales:** el servicio SOAP usa el mismo cliente Supabase server-side; el `userId` del envelope es solo un filtro de consulta.
 
 ---
 
@@ -669,7 +685,7 @@ Todas las tablas tienen **Row Level Security (RLS)** activado: cada usuario solo
 
 ### Consideraciones post-deploy
 
-- Agregar el dominio de Vercel en Supabase: **Authentication → URL Configuration → Site URL**.
+- Agregar el dominio de Vercel en Supabase: **Authentication → URL Configuration → Site URL** (necesario para los enlaces de recuperación de contraseña).
 - Verificar que las políticas RLS estén activas desde el dashboard de Supabase.
 - Actualizar la URL del servicio SOAP en `public/studyhub.wsdl` (elemento `<soap:address location="..."/>`).
 
@@ -679,10 +695,13 @@ Todas las tablas tienen **Row Level Security (RLS)** activado: cada usuario solo
 
 | Limitación | Estado |
 |-----------|--------|
-| Modo oscuro | Planificado |
+| Modo oscuro | ✅ Implementado (claro/oscuro con `data-theme`) |
+| Soporte PWA (instalable, service worker) | ✅ Implementado |
+| Recuperación de contraseña por email | ✅ Implementado |
+| Metas de estudio diaria/semanal | ✅ Implementado |
 | Exportación de notas a PDF / Markdown | No implementado |
 | Compartir notas entre usuarios | No implementado |
-| Soporte offline / PWA | No implementado |
+| Soporte offline completo (sincronización) | No implementado |
 | Autenticación en el servicio SOAP (WS-Security) | No implementado |
 | Operaciones de escritura vía SOAP (crear/actualizar) | No implementado |
 | Documentación interactiva de la API REST (OpenAPI/Swagger) | No implementado |
