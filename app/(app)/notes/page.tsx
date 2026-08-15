@@ -1,9 +1,9 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import { NotesClient } from '@/components/notes/NotesClient';
 
 export default async function NotesPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   const [{ data: folders }, { data: notes }] = await Promise.all([
     supabase

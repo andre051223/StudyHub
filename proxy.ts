@@ -5,8 +5,24 @@ export async function proxy(request: NextRequest) {
   return await updateSession(request);
 }
 
+// El proxy hace una llamada de red a Supabase (`auth.getUser()`) en cada request
+// que intercepta. El matcher anterior era una exclusión genérica, así que se
+// ejecutaba también en la landing estática, el manifest, los iconos, el service
+// worker y todas las rutas /api — pagando ese viaje de red sin necesitarlo.
+//
+// Aquí solo listamos las rutas donde el proxy realmente aporta algo: refrescar
+// la cookie de sesión y redirigir. Las rutas /api validan la sesión por su
+// cuenta (lib/api/helpers.ts) y las páginas de recuperación de contraseña
+// resuelven el código en el navegador.
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/dashboard/:path*',
+    '/notes/:path*',
+    '/tasks/:path*',
+    '/timer/:path*',
+    '/categories/:path*',
+    '/profile/:path*',
+    '/login',
+    '/register',
   ],
 };

@@ -1,12 +1,10 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import { CategoryModel } from '@/lib/models';
 import { TasksClient } from '@/components/tasks/TasksClient';
 
 export default async function TasksPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   const categoryModel = new CategoryModel(supabase);
 

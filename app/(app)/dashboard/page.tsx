@@ -1,11 +1,11 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import Link from 'next/link';
 import { BookOpen, CheckSquare, Timer, ArrowRight } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 
 export default async function DashboardPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   const [
     { data: profile },

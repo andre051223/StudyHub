@@ -35,7 +35,9 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/notes') ||
     pathname.startsWith('/tasks') ||
-    pathname.startsWith('/timer');
+    pathname.startsWith('/timer') ||
+    pathname.startsWith('/categories') ||
+    pathname.startsWith('/profile');
 
   if (!user && isProtectedRoute) {
     const url = request.nextUrl.clone();

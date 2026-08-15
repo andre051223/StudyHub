@@ -1,12 +1,10 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import { CategoryModel } from '@/lib/models';
 import { TimerClient } from '@/components/timer/TimerClient';
 
 export default async function TimerPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   const categoryModel = new CategoryModel(supabase);
 
