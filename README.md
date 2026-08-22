@@ -2,7 +2,7 @@
 
 > Plataforma web full-stack para estudiantes y autodidactas que centraliza tres herramientas del flujo de estudio diario: notas con editor enriquecido, gestión de tareas en la Matriz de Eisenhower y temporizador de estudio con estadísticas.
 
-La app está en español, su color de marca es el verde `#67b31f`, e incluye modo claro/oscuro y capacidades PWA (instalable, service worker).
+La app está en español, su color de marca es el verde `#67b31f`, e incluye modo claro/oscuro y capacidades PWA (instalable, service worker, lectura de apuntes sin conexión).
 
 ---
 
@@ -18,9 +18,10 @@ La app está en español, su color de marca es el verde `#67b31f`, e incluye mod
 8. [Variables de entorno](#variables-de-entorno)
 9. [Base de datos](#base-de-datos)
 10. [Scripts disponibles](#scripts-disponibles)
-11. [Seguridad](#seguridad)
-12. [Deploy](#deploy)
-13. [Limitaciones y trabajo futuro](#limitaciones-y-trabajo-futuro)
+11. [Pruebas](#pruebas)
+12. [Seguridad](#seguridad)
+13. [Deploy](#deploy)
+14. [Limitaciones y trabajo futuro](#limitaciones-y-trabajo-futuro)
 
 ---
 
@@ -30,9 +31,10 @@ StudyHub es una aplicación web construida con **Next.js 16** y **Supabase** que
 
 - **Notas** con editor de texto enriquecido (Tiptap), organización en carpetas, sistema de etiquetas y búsqueda full-text en español.
 - **Tareas** organizadas en la Matriz de Eisenhower con tablero Kanban de 4 cuadrantes y drag & drop.
-- **Temporizador** de estudio en modo simple (cuenta regresiva) o cronómetro (stopwatch), con historial de sesiones, estadísticas visuales y metas diarias/semanales.
+- **Agenda** semanal de fechas límite: donde la matriz responde «qué es importante», la agenda responde «qué me cae encima esta semana».
+- **Temporizador** de estudio en modo simple (cuenta regresiva) o cronómetro (stopwatch), que puede apuntar a una tarea concreta, con historial de sesiones, estadísticas visuales y metas diarias/semanales.
 
-Se apoya en un **dashboard** de resumen, **categorías/materias** compartidas entre tareas y sesiones, **modo claro/oscuro**, y capacidades **PWA**. Todo con autenticación segura, datos aislados por usuario mediante Row Level Security, diseño responsivo y una capa completa de servicios web **REST** y **SOAP** que expone la lógica de negocio como API consumible desde cualquier cliente.
+Se apoya en un **dashboard** de resumen, **categorías/materias** compartidas entre tareas y sesiones, una **búsqueda global** sobre notas y tareas accesible con `Ctrl+K`, **modo claro/oscuro** y capacidades **PWA** (instalable, con lectura de apuntes sin conexión). Todo con autenticación segura, datos aislados por usuario mediante Row Level Security, diseño responsivo y una capa completa de servicios web **REST** y **SOAP** que expone la lógica de negocio como API consumible desde cualquier cliente.
 
 ---
 
@@ -56,6 +58,7 @@ Se apoya en un **dashboard** de resumen, **categorías/materias** compartidas en
 | Fechas | date-fns | 4 | Modular y tree-shakeable |
 | Toasts | Sonner | — | Minimalista, accesible, cero configuración |
 | **Servicios SOAP** | **node-soap** | — | **Servidor SOAP 1.1 de solo lectura para Node.js** |
+| Pruebas | Vitest | 4 | Ejecuta la lógica pura de `lib/` sin navegador ni base de datos |
 | Utilidades CSS | clsx + tailwind-merge | — | Helper `cn()` en `lib/utils.ts` |
 
 ---
@@ -70,12 +73,14 @@ StudyHub implementa el patrón **Modelo — Vista — Controlador** aprovechando
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          VISTA (View)                               │
 │  components/  — Client Components React con "use client"            │
-│  ├── tasks/TasksClient.tsx   ← tablero Kanban Eisenhower            │
-│  ├── notes/NotesClient.tsx   ← lista de notas con filtros           │
-│  ├── timer/TimerClient.tsx   ← temporizador (simple / stopwatch)   │
-│  └── categories/CategoriesClient.tsx  ← CRUD de categorías        │
+│  ├── tasks/TasksClient.tsx      ← tablero Kanban Eisenhower         │
+│  ├── notes/NotesClient.tsx      ← lista de notas con filtros        │
+│  ├── agenda/AgendaClient.tsx    ← semana de fechas límite           │
+│  ├── timer/TimerClient.tsx      ← temporizador (simple / stopwatch) │
+│  ├── categories/CategoriesClient.tsx  ← CRUD de categorías          │
+│  └── shared/CommandPalette.tsx  ← búsqueda global (Ctrl+K)          │
 └──────────────────────┬──────────────────────────────────────────────┘
-                       │ fetch a /api/* (REST) o Server Actions
+                       │ Server Actions o fetch a /api/* (REST)
                        │ / cliente Supabase (browser) para auth e imágenes
 ┌──────────────────────▼──────────────────────────────────────────────┐
 │               CONTROLADOR / API LAYER (Controller)                  │
@@ -85,15 +90,23 @@ StudyHub implementa el patrón **Modelo — Vista — Controlador** aprovechando
 │  ├── categories/[id]/route.ts  GET · PATCH · DELETE                 │
 │  ├── tasks/route.ts            GET · POST                           │
 │  ├── tasks/[id]/route.ts       GET · PATCH · DELETE                 │
-│  ├── notes/route.ts            GET · POST  (soporta ?q= búsqueda)  │
+│  ├── notes/route.ts            GET · POST  (soporta ?q= búsqueda)   │
 │  ├── notes/[id]/route.ts       GET · PATCH · DELETE                 │
 │  ├── folders/route.ts          GET · POST                           │
 │  ├── folders/[id]/route.ts     GET · PATCH · DELETE                 │
 │  ├── sessions/route.ts         GET · POST                           │
 │  └── soap/route.ts             GET (WSDL) · POST (envelope XML)     │
 │                                                                     │
-│  app/(app)/categories/actions.ts  — Server Actions de categorías  │
-│  lib/api/helpers.ts  — getAuthContext() · ok() · err()             │
+│  app/(app)/**/actions.ts  — Server Actions                          │
+│  ├── actions.ts             búsqueda global (searchAction)          │
+│  ├── tasks/actions.ts       CRUD · subtareas · reordenar kanban     │
+│  ├── timer/actions.ts       registrar sesión · guardar metas        │
+│  ├── categories/actions.ts  CRUD de categorías                      │
+│  └── profile/actions.ts     nombre del perfil                       │
+│                                                                     │
+│  lib/api/schemas.ts   — esquemas Zod compartidos por ambos caminos  │
+│  lib/api/helpers.ts   — getAuthContext() · parseBody() · ok · err   │
+│  lib/api/actions.ts   — requireUser() · parseInput() · ActionResult │
 └──────────────────────┬──────────────────────────────────────────────┘
                        │ instancia y llama métodos
 ┌──────────────────────▼──────────────────────────────────────────────┐
@@ -102,18 +115,21 @@ StudyHub implementa el patrón **Modelo — Vista — Controlador** aprovechando
 │  ├── BaseModel.ts        ← clase base + ModelError                  │
 │  ├── CategoryModel.ts    ← CRUD + validación nombre y color         │
 │  ├── TaskModel.ts        ← CRUD + subtareas + posición en kanban    │
-│  ├── NoteModel.ts        ← CRUD + búsqueda full-text               │
+│  ├── NoteModel.ts        ← CRUD + búsqueda full-text                │
 │  ├── FolderModel.ts      ← CRUD + orphan cleanup de notas           │
-│  ├── SessionModel.ts     ← CRUD + cálculo de racha y estadísticas   │
-│  └── index.ts            ← barrel export                           │
+│  ├── SearchModel.ts      ← búsqueda global sobre notas y tareas     │
+│  ├── SessionModel.ts     ← CRUD + tiempo por tarea + estadísticas   │
+│  └── index.ts            ← barrel export                            │
 │                                                                     │
+│  lib/stats.ts · lib/deadlines.ts  ← lógica pura con tests (Vitest)  │
 │  lib/services/                                                      │
-│  └── StudyHubSoapService.ts  ← implementación de operaciones SOAP  │
+│  └── StudyHubSoapService.ts  ← implementación de operaciones SOAP   │
 └──────────────────────┬──────────────────────────────────────────────┘
                        │ cliente @supabase/supabase-js
 ┌──────────────────────▼──────────────────────────────────────────────┐
 │               CAPA DE DATOS (Supabase / PostgreSQL)                 │
 │  RLS activo en todas las tablas: cada usuario accede a sus filas    │
+│  Funciones SQL: search_everything() · handle_new_user()             │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -122,29 +138,51 @@ StudyHub implementa el patrón **Modelo — Vista — Controlador** aprovechando
 | **Vista** | `components/` — Client Components con `"use client"` | React + react-hook-form |
 | **Controlador REST** | `app/api/` — Route Handlers HTTP | Next.js App Router |
 | **Controlador SOAP** | `app/api/soap/route.ts` + WSDL | node-soap |
-| **Server Actions** | `app/(app)/categories/actions.ts` | Next.js Server Actions |
+| **Server Actions** | `app/(app)/**/actions.ts` — un módulo por área | Next.js Server Actions |
+| **Validación de entrada** | `lib/api/schemas.ts` — un esquema por operación | Zod |
+| **Sesión en el borde** | `proxy.ts` — refresca la cookie y redirige | Next.js Proxy (ex *middleware*) |
 | **Modelo** | `lib/models/` — clases con responsabilidad única | TypeScript + Supabase JS |
 | **Patrón DAO** | Cada Model encapsula todo acceso a su tabla | Clase con métodos CRUD |
+| **Lógica pura** | `lib/stats.ts`, `lib/deadlines.ts` — funciones sin I/O | TypeScript + Vitest |
+
+> **Dos caminos de escritura, una sola validación.** Los formularios de la app usan
+> Server Actions; los clientes externos usan la API REST. Ambos parsean la entrada con el
+> mismo esquema de `lib/api/schemas.ts` y terminan en el mismo modelo, así que endurecer
+> una regla la endurece en los dos caminos a la vez.
 
 **Flujo de una petición REST (ejemplo: crear tarea):**
 
 ```
 1. Cliente HTTP hace POST /api/tasks  con body JSON
 2. Route Handler verifica sesión con getAuthContext()
-3. Handler valida el body con Zod e instancia TaskModel(supabase)
-4. TaskModel.create() valida y aplica reglas de negocio
-5. Inserta en Supabase; RLS confirma user_id = auth.uid()
-6. Handler responde con ok(data) — la tarea creada en JSON
+3. parseBody() valida el body con createTaskSchema (Zod)
+4. Instancia TaskModel(supabase) y llama a create()
+5. TaskModel valida y aplica reglas de negocio
+6. Inserta en Supabase; RLS confirma user_id = auth.uid()
+7. Handler responde con ok(data) — la tarea creada en JSON
+```
+
+**Flujo de una Server Action (ejemplo: crear tarea desde el Kanban):**
+
+```
+1. TasksClient llama a createTaskAction(input)
+2. parseInput() valida con el mismo createTaskSchema
+3. requireUser() resuelve la sesión desde la cookie
+4. TaskModel.create() aplica las mismas reglas de negocio
+5. revalidatePath() refresca la pantalla
+6. Devuelve ActionResult: { ok: true, data } o { ok: false, error }
 ```
 
 **Flujo de una petición SOAP (ejemplo: GetTaskStats):**
 
 ```
-1. Cliente envía envelope XML al POST /api/soap
-2. Route Handler lee el WSDL desde public/studyhub.wsdl
-3. node-soap parsea el envelope y despacha la operación
-4. StudyHubSoapService.GetTaskStats() consulta la tabla tasks
-5. El resultado se serializa de vuelta como XML SOAP response
+1. Cliente envía envelope XML al POST /api/soap con su cookie de sesión
+2. El handler resuelve el usuario; sin sesión responde soap:Fault 401
+3. Lee el WSDL (cacheado en memoria tras la primera lectura)
+4. node-soap parsea el envelope y despacha la operación
+5. StudyHubSoapService.GetTaskStats() comprueba que el userId del
+   envelope coincida con el de la sesión y consulta la tabla tasks
+6. El resultado se serializa de vuelta como XML SOAP response
 ```
 
 ---
@@ -257,6 +295,12 @@ Valores válidos para `mode`: `simple` · `stopwatch` (`pomodoro` se conserva so
 ### API SOAP
 
 El servicio SOAP expone operaciones de **consulta y estadísticas** (solo lectura) reutilizando la misma capa de modelos que el REST. Sigue el protocolo **SOAP 1.1** con estilo `document/literal`.
+
+> **Autenticación.** El `POST /api/soap` **requiere sesión activa**: el usuario se deriva de
+> la cookie de Supabase, no del envelope. El elemento `<userId>` que declara el WSDL se sigue
+> aceptando por compatibilidad, pero solo si coincide con el usuario de la sesión; si no,
+> la operación responde `soap:Fault` con código `Client` (HTTP 403). Sin sesión, HTTP 401.
+> El `GET` del WSDL es público, porque un WSDL es un contrato, no un dato.
 
 #### Endpoints
 
@@ -378,9 +422,13 @@ Si ocurre un error, el servicio responde con un `soap:Fault` estándar:
 
 #### Probar el servicio SOAP con cURL
 
+El `POST` necesita la cookie de sesión: cópiala desde las DevTools del navegador
+(`Application → Cookies`) y pásala con `-b`. Sin ella la respuesta será un `soap:Fault` 401.
+
 ```bash
 curl -X POST http://localhost:3000/api/soap \
   -H "Content-Type: text/xml" \
+  -b "sb-<ref>-auth-token=<valor-de-la-cookie>" \
   -d '<?xml version="1.0"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
                xmlns:tns="http://studyhub.local/soap">
@@ -405,14 +453,17 @@ studyhub/
 │   │   ├── forgot-password/          # Solicitud de recuperación por email
 │   │   └── reset-password/           # Restablecimiento de contraseña
 │   ├── (app)/                        # Rutas protegidas (requieren sesión)
-│   │   ├── layout.tsx                # Guard de sesión (redirect a /login) + Navbar
-│   │   ├── dashboard/                # Resumen: notas, tareas y sesiones
+│   │   ├── layout.tsx                # Guard de sesión + Navbar + paleta de comandos
+│   │   ├── loading.tsx               # Esqueleto de carga del área autenticada
+│   │   ├── actions.ts                # searchAction — búsqueda global (Ctrl+K)
+│   │   ├── dashboard/                # Resumen del día: metas, vencimientos, atajos
 │   │   ├── notes/                    # Lista de notas con carpetas y tags
 │   │   ├── notes/[noteId]/           # Editor individual de nota (Tiptap)
-│   │   ├── tasks/                    # Kanban Eisenhower con drag & drop
-│   │   ├── timer/                    # Temporizador + historial + estadísticas + metas
-│   │   ├── categories/              # CRUD de categorías (page.tsx + actions.ts)
-│   │   └── profile/                  # Perfil de usuario
+│   │   ├── tasks/                    # Kanban Eisenhower (page.tsx + actions.ts)
+│   │   ├── agenda/                   # Semana de fechas límite
+│   │   ├── timer/                    # Temporizador + estadísticas (page.tsx + actions.ts)
+│   │   ├── categories/               # CRUD de categorías (page.tsx + actions.ts)
+│   │   └── profile/                  # Perfil de usuario (page.tsx + actions.ts)
 │   ├── api/                          # ← Capa de servicios web (REST + SOAP)
 │   │   ├── categories/               # route.ts · [id]/route.ts
 │   │   ├── tasks/                    # route.ts · [id]/route.ts
@@ -421,37 +472,52 @@ studyhub/
 │   │   ├── sessions/route.ts         # GET · POST
 │   │   └── soap/route.ts             # GET (WSDL) · POST (envelope)
 │   ├── icons/                        # icon-192, icon-512 (rutas dinámicas PWA)
+│   ├── screenshots/[variant]/        # Capturas wide/narrow del manifest (PWA)
 │   ├── icon.tsx / apple-icon.tsx     # Favicons generados
-│   ├── manifest.ts                   # Web App Manifest (PWA)
+│   ├── manifest.ts                   # Web App Manifest: iconos, capturas y shortcuts
 │   ├── layout.tsx                    # Layout raíz (theme init, fuente, Toaster, SW)
 │   ├── page.tsx                      # Landing pública
 │   └── globals.css                   # Tokens de tema (@theme) + estilos Tiptap
 │
 ├── components/
 │   ├── landing/                      # ShowcaseSection, mockups
-│   ├── notes/                        # NoteEditor, NotesClient
+│   ├── dashboard/                    # TodayStats, DueToday, LocalDate
+│   ├── notes/                        # NoteEditor, NotesClient, OfflineNotesCache
 │   ├── tasks/                        # TasksClient, KanbanColumn, TaskCard, TaskModal
-│   ├── timer/                        # TimerClient, MiniTimer, SessionHistory, StudyStats, StudyGoals
+│   ├── agenda/                       # AgendaClient — vista semanal de fechas límite
+│   ├── timer/                        # TimerClient, MiniTimer, SessionHistory,
+│   │                                 #   StudyStats, StudyGoals
 │   ├── categories/                   # CategoriesClient, CategoryForm, CategoryList
-│   └── shared/                       # Navbar, ThemeToggle, ProfileClient, ServiceWorkerRegistrar
+│   └── shared/                       # Navbar, CommandPalette, Modal, ConfirmProvider,
+│                                     #   ThemeToggle, ProfileClient, InstallPrompt,
+│                                     #   ServiceWorkerRegistrar
+│
+├── hooks/
+│   └── useMediaQuery.ts              # Media query con useSyncExternalStore
 │
 ├── lib/
 │   ├── supabase/
 │   │   ├── client.ts                 # Cliente para Client Components (browser)
 │   │   ├── server.ts                 # Cliente para Server Components / Route Handlers
-│   │   └── middleware.ts             # updateSession(): refresco de sesión + guard de rutas
+│   │   └── middleware.ts             # updateSession(): refresco de sesión + guard
 │   ├── models/                       # ← Capa de Modelos (patrón MVC/DAO)
 │   │   ├── BaseModel.ts              # Clase base + ModelError
 │   │   ├── CategoryModel.ts          # DAO de categorías: CRUD + reglas de negocio
 │   │   ├── TaskModel.ts              # DAO de tareas: CRUD + subtareas + posición kanban
 │   │   ├── NoteModel.ts              # DAO de notas: CRUD + búsqueda full-text
 │   │   ├── FolderModel.ts            # DAO de carpetas: CRUD + orphan cleanup
-│   │   ├── SessionModel.ts           # DAO de sesiones: CRUD + racha y estadísticas
+│   │   ├── SearchModel.ts            # Búsqueda global sobre notas y tareas
+│   │   ├── SessionModel.ts           # DAO de sesiones: CRUD + tiempo por tarea + stats
 │   │   └── index.ts                  # Barrel export de modelos y tipos Create/Update
 │   ├── services/                     # ← Capa de servicios SOAP
 │   │   └── StudyHubSoapService.ts    # GetCategories, GetTaskStats, GetStudyStats
 │   ├── api/
-│   │   └── helpers.ts                # getAuthContext() · ok() · err()
+│   │   ├── schemas.ts                # Esquemas Zod compartidos (REST + Server Actions)
+│   │   ├── helpers.ts                # getAuthContext() · parseBody() · ok() · err()
+│   │   └── actions.ts                # requireUser() · parseInput() · ActionResult
+│   ├── stats.ts + stats.test.ts      # Métricas de estudio: fuente única, con tests
+│   ├── deadlines.ts + .test.ts       # Fechas límite leídas en la zona del usuario
+│   ├── offline.ts                    # Copia local de notas para leer sin conexión
 │   ├── types.ts                      # Interfaces y tipos TypeScript compartidos
 │   └── utils.ts                      # cn() y utilidades
 │
@@ -460,24 +526,43 @@ studyhub/
 │
 ├── public/
 │   ├── studyhub.wsdl                 # Definición WSDL del servicio SOAP
+│   ├── sw.js                         # Service worker (v3): precachea la página offline
+│   ├── offline.html                  # Sin conexión: lista los apuntes guardados
+│   ├── icons/                        # icon-192.png, icon-512.png
 │   └── sounds/
 │       └── bell.wav                  # Sonido de notificación del temporizador
+│
+├── scripts/
+│   ├── generate-icons.mjs            # Genera los PNG de iconos de la PWA
+│   └── verify-app.mjs                # Recorrido de humo con Playwright + capturas
 │
 ├── supabase/
 │   └── migrations/
 │       ├── 001_initial.sql                   # Esquema completo de la base de datos
 │       ├── 002_categories_constraints.sql    # Constraints y RLS granular en categories
 │       ├── 003_user_goals.sql                # Metas diaria/semanal en profiles
-│       └── 004_stopwatch_mode.sql            # Modo stopwatch en study_sessions
+│       ├── 004_stopwatch_mode.sql            # Modo stopwatch en study_sessions
+│       ├── 005_data_integrity.sql            # Defaults de user_id, RLS con WITH CHECK
+│       ├── 006_task_sessions.sql             # study_sessions.task_id + política cruzada
+│       ├── 007_global_search.sql             # search_everything() + índice de tareas
+│       └── 008_onboarding.sql                # Siembra de la cuenta nueva (trigger)
 │
+├── markdown/Context.md         # Documento de contexto de la aplicación
+├── proxy.ts                    # Refresco de sesión en el borde (matcher explícito)
+├── vitest.config.mts           # Configuración de las pruebas (zona horaria fija)
 ├── .env.example                # Plantilla de variables de entorno
 └── next.config.ts              # Configuración de Next.js
 ```
 
-> **Nota:** no hay `middleware.ts` en la raíz ni `tailwind.config.ts`. El guard de rutas
-> efectivo se realiza en el Server Component `app/(app)/layout.tsx`; el helper
-> `lib/supabase/middleware.ts` (`updateSession`) implementa refresco de sesión + guard y
-> queda disponible para cablearse en un `middleware.ts` raíz si se necesita.
+> **Nota sobre el guard de rutas.** Es doble y deliberado. `proxy.ts` —el *middleware* de
+> Next.js, renombrado en la versión 16— refresca la cookie de sesión y redirige, pero solo
+> en las rutas de su `matcher`: cada request que intercepta hace una llamada de red a
+> Supabase, y no tiene sentido pagarla en la landing estática, el manifest, los iconos, el
+> service worker ni en `/api`. La comprobación que de verdad protege los datos vive en
+> `app/(app)/layout.tsx` (Server Component) y en las políticas RLS; las rutas `/api`
+> resuelven la sesión por su cuenta con `getAuthContext()`.
+>
+> Tampoco hay `tailwind.config.ts`: Tailwind v4 se configura con `@theme` en `globals.css`.
 
 ---
 
@@ -491,9 +576,10 @@ Permite crear, editar y organizar notas con formato enriquecido.
 - Editor Tiptap con toolbar completa: negrita, cursiva, encabezados H1–H3, código en línea, bloques de código con resaltado (lowlight), listas ordenadas/desordenadas, checklists (TaskList), enlaces e imágenes.
 - Organización en **carpetas** con contador de notas por carpeta (notas sin carpeta = "Inbox").
 - Sistema de **tags** con filtro por chip seleccionable.
-- **Búsqueda full-text en español** sobre título y texto plano de la nota (`content_text`).
+- **Búsqueda full-text en español** resuelta en el servidor: `NoteModel.search()` llama a la función `search_everything` (migración 007), que usa el índice GIN sobre título y texto plano. Antes se filtraba en memoria sobre las notas ya descargadas.
 - **Autoguardado** con debounce (sin botón de guardar explícito) e indicador Guardado/Guardando.
 - Subida de imágenes directamente a **Supabase Storage** (bucket `notes-images`).
+- Copia local de las últimas notas para **leerlas sin conexión** (`OfflineNotesCache`).
 
 ---
 
@@ -511,8 +597,24 @@ Organiza tareas según urgencia e importancia en un tablero Kanban de 4 cuadrant
 **Funcionalidades:**
 - **Drag & drop** entre columnas con @dnd-kit (actualiza `quadrant` y `position`).
 - **Modal de detalle** con subtareas anidadas, fecha límite (deadline) y categoría (creable inline).
+- **Tiempo dedicado** por tarea en la propia tarjeta, agregado desde las sesiones de estudio ligadas a ella (`SessionModel.studiedSecondsByTask()`).
 - Filtro por categoría y toggle para mostrar/ocultar tareas completadas.
 - **Actualizaciones optimistas** para experiencia fluida sin esperar respuesta del servidor.
+- Mutaciones vía Server Actions (`tasks/actions.ts`), validadas con los mismos esquemas Zod que la API REST.
+
+---
+
+### Agenda — fechas límite
+
+Vista semanal de las tareas que tienen `deadline`. La matriz de Eisenhower responde «qué es
+importante»; la agenda responde «qué me cae encima esta semana», que era la pregunta que
+obligaba a mantener un calendario aparte.
+
+**Funcionalidades:**
+- Rejilla de lunes a domingo con navegación entre semanas, instantánea: las tareas con fecha se traen una vez y la semana la calcula el cliente.
+- Las tareas se agrupan por su **día natural en la zona horaria del usuario**. `tasks.deadline` es un `timestamptz` que guarda la medianoche UTC del día elegido en el `<input type="date">`; leerlo con los getters locales adelantaba un día todas las fechas al oeste de Greenwich. `lib/deadlines.ts` centraliza esa lectura.
+- Marcado de **vencidas** y color de borde por cuadrante, igual que en el Kanban.
+- Completar una tarea desde la propia agenda.
 
 ---
 
@@ -528,18 +630,64 @@ Registra sesiones de estudio con estadísticas para seguimiento del hábito.
 > para mostrar sesiones antiguas.
 
 **Funcionalidades:**
+- **Sesión ligada a una tarea concreta** (migración 006): el selector lista las tareas pendientes y hereda su categoría. Es lo que conecta el temporizador con el Kanban en las dos direcciones — elegir sobre qué se estudia, y ver después cuánto se le dedicó.
 - Estado del timer persistido en `localStorage` para sobrevivir recargas; el tiempo se calcula por timestamps (no por contadores) para funcionar en segundo plano.
 - `MiniTimer` para ver el timer activo desde otras vistas.
 - **Notificaciones sonoras** (`public/sounds/bell.wav`) y **Web Notifications API** al completar.
-- **Historial** de sesiones con filtros (fecha, duración, categoría).
+- **Historial** de sesiones con filtros (fecha, duración, categoría) y la tarea asociada.
 - **Estadísticas** (Recharts): minutos por día, distribución por categoría, racha actual, categoría top del mes y promedio diario.
 - **Metas** diaria y semanal (`StudyGoals`), guardadas en `profiles` (`daily_goal_minutes`, `weekly_goal_minutes`).
+
+> Todas las métricas salen de `lib/stats.ts`, que es la única implementación. Suman
+> `actual_duration_seconds` —lo realmente estudiado— y no `duration_minutes` —lo planeado—, y
+> agrupan los días por la fecha local del usuario y no por la UTC del timestamp.
+
+---
+
+### Búsqueda global y paleta de comandos
+
+`Ctrl+K` (o `⌘K`) abre una paleta que busca **notas y tareas a la vez** y ofrece atajos de
+navegación a cada sección. Está montada en el layout del área autenticada, así que se abre
+desde cualquier pantalla.
+
+- El término viaja a `searchAction` (Server Action), que valida y delega en la función SQL `search_everything`.
+- **Full-text en español con prefijo:** escribir «cálc» encuentra «Cálculo» mientras se teclea. El término se pasa como parámetro y se sanea en `studyhub_prefix_tsquery`, así que un paréntesis o un `&` no rompen la consulta.
+- Navegación completa con teclado (flechas y Enter); las tareas completadas quedan fuera de los resultados.
+- La función es `SECURITY INVOKER`: son las políticas RLS de `notes` y `tasks` las que acotan los resultados al usuario, no un filtro en el código.
+
+---
+
+### Dashboard
+
+Resumen del día al entrar: progreso frente a la meta diaria y racha (`TodayStats`), tareas
+que vencen hoy o están vencidas (`DueToday`), lo urgente e importante pendiente, las últimas
+notas y accesos directos para empezar a estudiar.
 
 ---
 
 ### Categorías
 
 CRUD de materias/áreas compartidas entre tareas y sesiones (listar, crear, renombrar, recolorear, eliminar). Constraints de unicidad, longitud y color hex a nivel de base de datos. Mutaciones vía Server Actions (`actions.ts`) y/o API REST.
+
+---
+
+### PWA y modo sin conexión
+
+- **Instalable:** manifest con iconos, capturas para los dos factores de forma (`app/screenshots/[variant]`) y accesos directos. `InstallPrompt` captura `beforeinstallprompt` y ofrece la instalación desde la interfaz, en lugar de dejarla escondida en el menú del navegador.
+- **Service worker** (`public/sw.js`, caché `studyhub-v3`): precachea la página de respaldo y la sirve cuando falla una navegación. El HTML de las rutas autenticadas **no se cachea a propósito** — depende de la sesión y servirlo de caché podría mostrar datos de otra cuenta.
+- **Apuntes sin conexión:** `lib/offline.ts` guarda en el navegador hasta 50 notas recientes (8000 caracteres cada una) y `public/offline.html` —HTML estático— las lista y las deja leer. La copia se marca con el id del usuario y se borra al cerrar sesión.
+
+---
+
+### Cuenta nueva
+
+Una cuenta recién registrada ya no arranca vacía. El trigger `handle_new_user` (migración
+008), además de crear el perfil, siembra tres categorías (`General`, `Lecturas`, `Exámenes`)
+y una nota de bienvenida que explica la matriz de Eisenhower y el atajo `Ctrl+K`.
+
+El sembrado va dentro de un bloque con su propio `EXCEPTION`: corre en la transacción del
+registro, y una bienvenida que falla es un inconveniente, pero un registro que falla no. Las
+cuentas existentes no se tocan.
 
 ---
 
@@ -564,16 +712,24 @@ npm install
 cp .env.example .env.local
 # Editar .env.local con las credenciales de Supabase (ver sección siguiente)
 
-# 4. Ejecutar migraciones en Supabase (en orden)
+# 4. Ejecutar migraciones en Supabase (en orden, sin saltarse ninguna)
 # Ir a supabase.com → SQL Editor → pegar y ejecutar en secuencia:
 # supabase/migrations/001_initial.sql
 # supabase/migrations/002_categories_constraints.sql
 # supabase/migrations/003_user_goals.sql
 # supabase/migrations/004_stopwatch_mode.sql
+# supabase/migrations/005_data_integrity.sql
+# supabase/migrations/006_task_sessions.sql
+# supabase/migrations/007_global_search.sql
+# supabase/migrations/008_onboarding.sql
 
 # 5. Iniciar el servidor de desarrollo
 npm run dev
 ```
+
+> El orden importa: cada migración asume el estado que deja la anterior. Quedarse en la 004
+> deja una base que arranca pero en la que fallan la búsqueda global, el temporizador ligado
+> a tareas y la siembra de las cuentas nuevas.
 
 Abre [http://localhost:3000](http://localhost:3000) en el navegador.
 
@@ -614,7 +770,9 @@ Las claves se encuentran en el dashboard de Supabase en **Settings → API**.
 
 ## Base de datos
 
-El esquema se construye en cuatro migraciones ejecutadas en orden. Todas las tablas tienen **Row Level Security (RLS)** activado: cada usuario solo puede leer y escribir sus propios registros.
+El esquema se construye en **ocho migraciones** ejecutadas en orden. Todas las tablas tienen
+**Row Level Security (RLS)** activado: cada usuario solo puede leer y escribir sus propios
+registros.
 
 ### `001_initial.sql` — Esquema base
 
@@ -650,6 +808,36 @@ Agrega a `profiles` las columnas `daily_goal_minutes` (default 60, CHECK 5–480
 
 Amplía el enum `study_mode` para incluir `stopwatch` junto a `simple` y `pomodoro` (legado).
 
+### `005_data_integrity.sql` — Integridad de datos
+
+- **`user_id` por defecto:** `ALTER COLUMN user_id SET DEFAULT auth.uid()` en las cinco tablas de usuario. Las inserciones desde el cliente no envían `user_id` y la columna es `NOT NULL`; declararlo aquí hace que un despliegue limpio quede igual que producción. En una conexión sin JWT `auth.uid()` es `NULL` y el `NOT NULL` sigue protegiendo la tabla.
+- **RLS con `WITH CHECK` explícito** en `folders`, `notes`, `tasks` y `study_sessions`, extendiendo a todas las tablas el criterio que la 002 aplicó a `categories`. `FOR ALL USING (…)` funcionaba, pero dejaba la política de escritura sin declarar.
+- **Rango de duración corregido:** el CHECK de `duration_minutes` pasa de 1–120 a 1–1440 (y admite `NULL`), que es lo que hace realmente guardable una sesión larga de cronómetro. `actual_duration_seconds >= 0`.
+- Índice parcial `sessions_completed_idx (user_id, started_at DESC) WHERE completed_at IS NOT NULL`, que es como consultan todas las estadísticas.
+
+### `006_task_sessions.sql` — Sesiones ligadas a tareas
+
+Añade `study_sessions.task_id` con `ON DELETE SET NULL` —borrar una tarea no borra el
+historial de estudio— y el índice parcial `sessions_task_idx`.
+
+La política de `INSERT`/`UPDATE` comprueba además que la tarea referenciada **pertenezca al
+mismo usuario**: RLS ya impide leer o escribir filas ajenas, pero no impedía por sí sola que
+una sesión propia apuntara al id de la tarea de otra persona.
+
+### `007_global_search.sql` — Búsqueda global
+
+- Índice GIN `tasks_search_idx` sobre `title || coalesce(description, '')`, el equivalente para tareas del que ya existía para notas.
+- `studyhub_prefix_tsquery(text)`: convierte texto libre en una `tsquery` con prefijo (`palabra:*`). `plainto_tsquery` no hace prefijo y `to_tsquery` revienta con un paréntesis del usuario; esta función se queda solo con las palabras y devuelve una consulta vacía en lugar de fallar.
+- `search_everything(q, max_results)`: `UNION ALL` de notas y tareas pendientes ordenado por `ts_rank`. Es `SECURITY INVOKER`, así que corre con los permisos del usuario y son las políticas RLS las que acotan el resultado.
+
+### `008_onboarding.sql` — Cuenta nueva sembrada
+
+Reescribe `handle_new_user` para que, además de crear el perfil, inserte tres categorías de
+arranque y una nota de bienvenida. El sembrado va en un bloque `EXCEPTION` propio: corre
+dentro de la transacción de registro y no debe poder impedir la creación de la cuenta. Las
+cuentas ya existentes no se modifican (la migración deja el SQL comentado por si se quiere
+sembrar una cuenta de pruebas a mano).
+
 ---
 
 ## Scripts disponibles
@@ -660,18 +848,49 @@ Amplía el enum `study_mode` para incluir `stopwatch` junto a `simple` y `pomodo
 | `npm run build` | Build optimizado de producción (`next build`) |
 | `npm start` | Servidor de producción (requiere build previo) |
 | `npm run lint` | Análisis estático con ESLint |
+| `npm test` | Ejecuta la suite de pruebas una vez (`vitest run`) |
+| `npm run test:watch` | Pruebas en modo watch durante el desarrollo |
+
+Además, en `scripts/` hay dos utilidades que no forman parte del ciclo normal:
+`generate-icons.mjs` regenera los PNG de la PWA y `verify-app.mjs` hace un recorrido de humo
+con Playwright sobre la app en `localhost:3000` y guarda capturas en `.screenshots/`.
+
+---
+
+## Pruebas
+
+Las pruebas cubren la **lógica pura** del proyecto: los dos módulos donde un error es
+silencioso y no lo revela ninguna pantalla en blanco.
+
+| Archivo | Qué protege |
+|---|---|
+| `lib/stats.test.ts` | Métricas de estudio: minutos por día, racha, promedio, totales por categoría |
+| `lib/deadlines.test.ts` | Lectura de fechas límite: vencida, hoy, mañana, próxima |
+
+Ambos casos tienen la misma raíz —mezclar zonas horarias— con el signo cambiado: una sesión
+de estudio es un instante real que hay que **agrupar en la zona local**, mientras que una
+fecha límite es un día de calendario guardado como medianoche UTC que hay que **leer en UTC**.
+Por eso `vitest.config.mts` fija `TZ: 'America/Bogota'`: con la zona en UTC los tests pasarían
+sin detectar ninguna de las dos regresiones.
+
+```bash
+npm test
+```
 
 ---
 
 ## Seguridad
 
-- **RLS en todas las tablas:** los usuarios solo acceden a sus propios datos, incluso con la clave anónima.
+- **RLS en todas las tablas:** los usuarios solo acceden a sus propios datos, incluso con la clave anónima. Desde la migración 005 las políticas son granulares por operación y declaran `WITH CHECK` explícito, en lugar de apoyarse en que Postgres reutilice la expresión de `USING`.
 - **Sin secretos en el código:** todas las credenciales se leen desde variables de entorno.
 - **Autenticación en Route Handlers:** cada endpoint REST verifica la sesión con `getAuthContext()` antes de instanciar cualquier modelo.
-- **Validación con Zod** en formularios del cliente y en los route handlers del servidor.
+- **Autenticación en Server Actions:** cada acción llama a `requireUser()` antes de tocar un modelo. Ser una Server Action no la hace privada: es un endpoint HTTP como cualquier otro.
+- **Validación con Zod en un solo sitio:** `lib/api/schemas.ts` alimenta los formularios, los route handlers y las Server Actions. Antes los handlers hacían `model.create(await req.json())` con el body sin filtrar mientras el formulario sí validaba, así que cliente y servidor aceptaban cosas distintas.
 - **`SUPABASE_SERVICE_ROLE_KEY`** solo se usa en Server Components y API Routes; nunca se envía al navegador.
-- **Guard de rutas:** `app/(app)/layout.tsx` obtiene el usuario y redirige a `/login` si no hay sesión; `lib/supabase/middleware.ts` refresca el token y queda disponible para el guard en el edge.
-- **SOAP sin exposición de credenciales:** el servicio SOAP usa el mismo cliente Supabase server-side; el `userId` del envelope es solo un filtro de consulta.
+- **Guard de rutas en dos capas:** `proxy.ts` refresca la cookie y redirige en las rutas de su `matcher`; `app/(app)/layout.tsx` obtiene el usuario y redirige a `/login` si no hay sesión. El límite real lo ponen las políticas RLS, no la redirección.
+- **SOAP autenticado:** el `POST /api/soap` exige sesión y deriva el usuario de la cookie. El `userId` del envelope solo se acepta si coincide con el de la sesión; si no, `soap:Fault`. Los mensajes de error del servicio se devuelven, pero los de Postgres solo se registran en el servidor, porque describen el esquema.
+- **Búsqueda con la entrada como parámetro:** el término de búsqueda llega a `search_everything` como argumento y se sanea en SQL, no se interpola en la consulta. La función es `SECURITY INVOKER`, así que sigue sujeta a RLS.
+- **Caché offline acotada:** la copia local de notas se marca con el id del usuario —la de otra cuenta se ignora y se borra— y se limpia al cerrar sesión. El HTML de las rutas autenticadas no se guarda en el service worker.
 
 ---
 
@@ -686,8 +905,9 @@ Amplía el enum `study_mode` para incluir `stopwatch` junto a `simple` y `pomodo
 ### Consideraciones post-deploy
 
 - Agregar el dominio de Vercel en Supabase: **Authentication → URL Configuration → Site URL** (necesario para los enlaces de recuperación de contraseña).
+- Ejecutar en el proyecto de producción **las ocho migraciones** en orden. Sin la 007 la paleta de comandos falla al llamar a `search_everything`.
 - Verificar que las políticas RLS estén activas desde el dashboard de Supabase.
-- Actualizar la URL del servicio SOAP en `public/studyhub.wsdl` (elemento `<soap:address location="..."/>`).
+- Actualizar la URL del servicio SOAP en `public/studyhub.wsdl` (elemento `<soap:address location="..."/>`), que apunta a `http://localhost:3000/api/soap`.
 
 ---
 
@@ -699,9 +919,16 @@ Amplía el enum `study_mode` para incluir `stopwatch` junto a `simple` y `pomodo
 | Soporte PWA (instalable, service worker) | ✅ Implementado |
 | Recuperación de contraseña por email | ✅ Implementado |
 | Metas de estudio diaria/semanal | ✅ Implementado |
+| Búsqueda global de notas y tareas (`Ctrl+K`) | ✅ Implementado |
+| Agenda de fechas límite | ✅ Implementado |
+| Sesiones de estudio ligadas a una tarea | ✅ Implementado |
+| Autenticación por sesión en el servicio SOAP | ✅ Implementado |
+| Pruebas automatizadas de la lógica de estadísticas y fechas | ✅ Implementado (Vitest) |
+| Lectura de apuntes sin conexión | 🟡 Parcial — se guardan las 50 notas más recientes; no hay escritura offline |
+| Sincronización offline (escribir sin conexión y resolver conflictos) | No implementado |
 | Exportación de notas a PDF / Markdown | No implementado |
 | Compartir notas entre usuarios | No implementado |
-| Soporte offline completo (sincronización) | No implementado |
-| Autenticación en el servicio SOAP (WS-Security) | No implementado |
+| WS-Security en el servicio SOAP | No implementado (la autenticación es por cookie de sesión) |
 | Operaciones de escritura vía SOAP (crear/actualizar) | No implementado |
 | Documentación interactiva de la API REST (OpenAPI/Swagger) | No implementado |
+| Pruebas de integración / end-to-end | No implementado (`scripts/verify-app.mjs` es solo un recorrido de humo manual) |
