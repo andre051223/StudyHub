@@ -1,207 +1,162 @@
 import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import Link from 'next/link';
-import { BookOpen, CheckSquare, Timer, ArrowRight } from 'lucide-react';
-import { formatDate } from '@/lib/utils';
+import { ArrowRight, FileText, ListChecks, Play } from 'lucide-react';
+import { SessionModel } from '@/lib/models';
+import { endOfTodayForQuery } from '@/lib/deadlines';
+import type { Task } from '@/lib/types';
+import { TodayStats } from '@/components/dashboard/TodayStats';
+import { DueToday } from '@/components/dashboard/DueToday';
+import { LocalDate } from '@/components/dashboard/LocalDate';
 
+/**
+ * El dashboard es la primera pantalla tras iniciar sesión y era la más pobre:
+ * tres contadores, tres accesos directos y cinco filas de sesiones. Nada de
+ * eso se puede accionar, y los accesos directos duplicaban la barra de
+ * navegación, que ya está siempre visible.
+ *
+ * Ahora responde a las cuatro preguntas del día con datos que la aplicación ya
+ * tenía y no enseñaba: qué vence hoy y qué está vencido, cómo va la meta
+ * diaria, cuánto mide la racha, y por dónde seguir.
+ */
 export default async function DashboardPage() {
   const supabase = await createClient();
   const user = await getCurrentUser();
+  const sessionModel = new SessionModel(supabase);
 
   const [
     { data: profile },
-    { count: noteCount },
+    statsSessions,
+    { data: dueTasks },
+    { data: focusTasks },
+    { data: lastNote },
     { count: pendingTaskCount },
-    { data: recentSessions },
   ] = await Promise.all([
-    supabase.from('profiles').select('full_name').eq('id', user!.id).single(),
-    supabase.from('notes').select('*', { count: 'exact', head: true }).eq('user_id', user!.id),
+    supabase
+      .from('profiles')
+      .select('full_name, daily_goal_minutes')
+      .eq('id', user!.id)
+      .single(),
+
+    // Una sola consulta alimenta meta, racha y semana; los agregados se
+    // calculan en el navegador para que el día natural sea el del usuario.
+    sessionModel.findForStats(user!.id),
+
+    // Pendientes con plazo hasta el final de hoy. El margen de un día extra lo
+    // recorta `DueToday` en la zona del usuario (ver lib/deadlines.ts).
+    supabase
+      .from('tasks')
+      .select('*, category:categories(*)')
+      .eq('user_id', user!.id)
+      .eq('completed', false)
+      .not('deadline', 'is', null)
+      .lte('deadline', endOfTodayForQuery())
+      .order('deadline', { ascending: true })
+      .limit(20),
+
+    // Lo siguiente del cuadrante «Hacer ahora», en el orden que el usuario le
+    // dio arrastrando.
+    supabase
+      .from('tasks')
+      .select('id, title')
+      .eq('user_id', user!.id)
+      .eq('completed', false)
+      .eq('quadrant', 'urgent_important')
+      .order('position', { ascending: true })
+      .limit(3),
+
+    supabase
+      .from('notes')
+      .select('id, title, updated_at')
+      .eq('user_id', user!.id)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+
     supabase
       .from('tasks')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', user!.id)
       .eq('completed', false),
-    supabase
-      .from('study_sessions')
-      .select('id, duration_minutes, started_at, completed_at')
-      .eq('user_id', user!.id)
-      .order('started_at', { ascending: false })
-      .limit(5),
   ]);
 
   const firstName = profile?.full_name?.split(' ')[0] ?? 'Estudiante';
 
-  const totalMinutesThisWeek =
-    recentSessions
-      ?.filter((s) => {
-        const d = new Date(s.started_at);
-        const weekAgo = new Date();
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        return d >= weekAgo && s.completed_at !== null;
-      })
-      .reduce((acc, s) => acc + (s.duration_minutes ?? 0), 0) ?? 0;
-
   return (
-    <main className="max-w-5xl mx-auto px-6 py-8">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-[var(--color-text)]">
-          Hola, {firstName}
-        </h1>
-        <p className="text-[var(--color-text-soft)] mt-1">
-          {new Date().toLocaleDateString('es-CO', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-          })}
-        </p>
-      </div>
+    <main className="max-w-5xl mx-auto px-4 md:px-6 py-8">
+      <header className="mb-7">
+        <h1 className="heading-page text-[var(--color-text)]">Hola, {firstName}</h1>
+        <LocalDate />
+      </header>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-        <StatCard label="Notas creadas" value={String(noteCount ?? 0)} color="blue" />
-        <StatCard label="Tareas pendientes" value={String(pendingTaskCount ?? 0)} color="green" />
-        <StatCard
-          label="Minutos esta semana"
-          value={String(totalMinutesThisWeek)}
-          color="orange"
-        />
-      </div>
+      <TodayStats
+        sessions={statsSessions}
+        dailyGoal={profile?.daily_goal_minutes ?? 60}
+      />
 
-      {/* Quick access */}
-      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4">Acceso rápido</h2>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <QuickCard
-          href="/notes"
-          icon={BookOpen}
-          title="Notas"
-          desc="Escribe y organiza tus apuntes"
-          color="blue"
-        />
-        <QuickCard
-          href="/tasks"
-          icon={CheckSquare}
-          title="Tareas"
-          desc="Gestiona tu carga académica"
-          color="green"
-        />
-        <QuickCard
-          href="/timer"
-          icon={Timer}
-          title="Tiempo de estudio"
-          desc="Inicia una sesión de estudio"
-          color="orange"
-        />
-      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+        <div className="lg:col-span-2">
+          <DueToday tasks={(dueTasks ?? []) as Task[]} />
+        </div>
 
-      {/* Recent sessions */}
-      {recentSessions && recentSessions.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-[var(--color-text)]">
-              Sesiones recientes
-            </h2>
+        {/* Continuar donde lo dejaste */}
+        <section className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col">
+          <header className="px-5 py-4 border-b border-[var(--color-gray-border)]">
+            <h2 className="heading-section">Continuar</h2>
+          </header>
+
+          <div className="p-5 space-y-5 flex-1">
             <Link
               href="/timer"
-              className="text-sm text-[var(--color-primary)] hover:underline flex items-center gap-1"
+              className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-[var(--color-primary)] text-white text-sm font-medium hover:bg-[var(--color-primary-dark)] transition-colors"
             >
-              Ver todo <ArrowRight size={14} />
+              <Play size={15} />
+              Iniciar sesión de estudio
             </Link>
-          </div>
-          <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-gray-border)] overflow-hidden">
-            {recentSessions.map((s, i) => (
-              <div
-                key={s.id}
-                className={`flex items-center justify-between px-5 py-3 text-sm ${
-                  i < recentSessions.length - 1
-                    ? 'border-b border-[var(--color-gray-border)]'
-                    : ''
-                }`}
-              >
-                <span className="text-[var(--color-text)]">
-                  {formatDate(s.started_at)}
-                </span>
-                <span className="text-[var(--color-text-soft)]">
-                  {s.duration_minutes} min
-                </span>
-                <span
-                  className={`text-xs px-2 py-1 rounded-full ${
-                    s.completed_at
-                      ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400'
-                      : 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-[var(--color-text-soft)]'
-                  }`}
+
+            <div>
+              <h3 className="text-eyebrow mb-2">Última nota</h3>
+              {lastNote ? (
+                <Link
+                  href={`/notes/${lastNote.id}`}
+                  className="flex items-center gap-2 text-sm text-[var(--color-text)] hover:text-[var(--color-primary)] transition-colors"
                 >
-                  {s.completed_at ? 'Completada' : 'Abandonada'}
-                </span>
-              </div>
-            ))}
+                  <FileText size={14} className="text-[var(--color-gray-mid)] flex-shrink-0" />
+                  <span className="truncate">{lastNote.title || 'Sin título'}</span>
+                </Link>
+              ) : (
+                <Link href="/notes" className="text-sm text-[var(--color-primary)] hover:underline">
+                  Escribe tu primera nota
+                </Link>
+              )}
+            </div>
+
+            <div>
+              <h3 className="text-eyebrow mb-2">Hacer ahora</h3>
+              {focusTasks && focusTasks.length > 0 ? (
+                <ul className="space-y-1.5">
+                  {focusTasks.map((task) => (
+                    <li key={task.id} className="flex items-start gap-2 text-sm text-[var(--color-text)]">
+                      <ListChecks size={14} className="mt-0.5 text-[var(--color-gray-mid)] flex-shrink-0" />
+                      <span className="truncate">{task.title}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-meta">
+                  Nada urgente e importante. {pendingTaskCount ?? 0} pendientes en total.
+                </p>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+
+          <Link
+            href="/tasks"
+            className="flex items-center justify-center gap-1 px-5 py-3 text-sm text-[var(--color-primary)] border-t border-[var(--color-gray-border)] hover:bg-[var(--color-gray-light)] transition-colors"
+          >
+            Abrir la matriz <ArrowRight size={14} />
+          </Link>
+        </section>
+      </div>
     </main>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: string;
-  color: 'blue' | 'green' | 'orange';
-}) {
-  const colors = {
-    blue: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
-    green: 'bg-[#67b31f1a] text-[#67b31f] dark:text-[var(--color-primary-light)]',
-    orange: 'bg-orange-50 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400',
-  };
-
-  // Toma solo las clases de texto (text-* y su variante dark:), no el fondo.
-  const textColor = colors[color]
-    .split(' ')
-    .filter((c) => c.includes('text-'))
-    .join(' ');
-
-  return (
-    <div className="bg-[var(--color-surface)] rounded-xl p-5 shadow-[var(--shadow-card)]">
-      <p className="text-sm text-[var(--color-text-soft)] mb-1">{label}</p>
-      <p className={`text-3xl font-bold ${textColor}`}>{value}</p>
-    </div>
-  );
-}
-
-function QuickCard({
-  href,
-  icon: Icon,
-  title,
-  desc,
-  color,
-}: {
-  href: string;
-  icon: React.ElementType;
-  title: string;
-  desc: string;
-  color: 'blue' | 'green' | 'orange';
-}) {
-  const colors = {
-    blue: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
-    green: 'bg-[#67b31f1a] text-[#67b31f] dark:text-[var(--color-primary-light)]',
-    orange: 'bg-orange-50 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400',
-  };
-
-  return (
-    <Link
-      href={href}
-      className="bg-[var(--color-surface)] rounded-xl p-5 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-all hover:-translate-y-1 flex items-start gap-4"
-    >
-      <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${colors[color]}`}>
-        <Icon size={20} />
-      </div>
-      <div>
-        <h3 className="font-semibold text-[var(--color-text)]">{title}</h3>
-        <p className="text-sm text-[var(--color-text-soft)] mt-0.5">{desc}</p>
-      </div>
-      <ArrowRight size={16} className="text-[var(--color-gray-mid)] ml-auto mt-1" />
-    </Link>
   );
 }

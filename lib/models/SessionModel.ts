@@ -1,10 +1,18 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import type { StudySession, StudyMode } from '@/lib/types';
+import { summarize, type StatsSession } from '@/lib/stats';
 import { BaseModel } from './BaseModel';
+
+/** Límites del selector de duración del temporizador (modo `simple`). */
+export const MIN_TIMER_MINUTES = 10;
+export const MAX_TIMER_MINUTES = 120;
 
 export interface CreateSessionInput {
   category_id?: string | null;
-  duration_minutes: number;
+  /** Tarea sobre la que se estudió. Null = sesión suelta (migración 006). */
+  task_id?: string | null;
+  /** Null en modo cronómetro: no hay duración planeada. */
+  duration_minutes: number | null;
   actual_duration_seconds: number;
   mode: StudyMode;
   pomodoro_cycles_completed?: number;
@@ -28,7 +36,7 @@ export class SessionModel extends BaseModel {
   async findAllByUser(userId: string, limit = 50): Promise<StudySession[]> {
     const { data, error } = await this.supabase
       .from('study_sessions')
-      .select('*, category:categories(name, color)')
+      .select('*, category:categories(name, color), task:tasks(id, title)')
       .eq('user_id', userId)
       .order('started_at', { ascending: false })
       .limit(limit);
@@ -48,8 +56,24 @@ export class SessionModel extends BaseModel {
   }
 
   async create(input: CreateSessionInput, userId: string): Promise<StudySession> {
-    if (input.duration_minutes < 10 || input.duration_minutes > 120) {
-      throw new Error('La duración debe estar entre 10 y 120 minutos.');
+    // El cronómetro no tiene duración planeada, así que el rango del selector
+    // del temporizador no le aplica. Validarlo con la misma regla hacía
+    // imposible guardar una sesión de cronómetro larga o muy corta.
+    if (input.mode !== 'stopwatch') {
+      const planned = input.duration_minutes;
+      if (
+        planned === null ||
+        planned < MIN_TIMER_MINUTES ||
+        planned > MAX_TIMER_MINUTES
+      ) {
+        throw new Error(
+          `La duración debe estar entre ${MIN_TIMER_MINUTES} y ${MAX_TIMER_MINUTES} minutos.`
+        );
+      }
+    }
+
+    if (input.actual_duration_seconds < 0) {
+      throw new Error('El tiempo transcurrido no puede ser negativo.');
     }
 
     const { data, error } = await this.supabase
@@ -57,6 +81,7 @@ export class SessionModel extends BaseModel {
       .insert({
         user_id: userId,
         category_id: input.category_id ?? null,
+        task_id: input.task_id ?? null,
         duration_minutes: input.duration_minutes,
         actual_duration_seconds: input.actual_duration_seconds,
         mode: input.mode,
@@ -65,82 +90,71 @@ export class SessionModel extends BaseModel {
         completed_at: input.completed_at ?? null,
         notes: input.notes ?? null,
       })
-      .select('*, category:categories(name, color)')
+      .select('*, category:categories(name, color), task:tasks(id, title)')
       .single();
     if (error) this.handleError(error);
     return data;
   }
 
-  async getStats(userId: string): Promise<SessionStats> {
-    const now = new Date();
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - 6);
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  /**
+   * Sesiones completadas de los últimos `days` días, con las columnas mínimas
+   * que necesitan los cálculos de `lib/stats.ts`.
+   *
+   * Es la consulta que alimenta todas las estadísticas. La ventana está
+   * acotada para que el payload no crezca sin límite, pero es lo bastante
+   * amplia como para que la racha y el promedio no se corten: antes las
+   * pantallas derivaban estos números de las últimas 50 sesiones, así que a
+   * los dos meses de uso la racha se rompía en el borde de esa ventana.
+   */
+  async findForStats(userId: string, days = 365): Promise<StatsSession[]> {
+    const from = new Date();
+    from.setDate(from.getDate() - days);
+    from.setHours(0, 0, 0, 0);
 
-    const { data: weekData } = await this.supabase
+    const { data, error } = await this.supabase
       .from('study_sessions')
-      .select('actual_duration_seconds, started_at')
+      .select('started_at, actual_duration_seconds, completed_at, category_id, category:categories(name, color)')
       .eq('user_id', userId)
       .not('completed_at', 'is', null)
-      .gte('started_at', weekStart.toISOString());
-
-    const totalMinutesThisWeek = Math.round(
-      (weekData ?? []).reduce((sum, s) => sum + s.actual_duration_seconds, 0) / 60
-    );
-
-    const dailyAverage = weekData && weekData.length > 0
-      ? Math.round(totalMinutesThisWeek / 7)
-      : 0;
-
-    const { data: monthData } = await this.supabase
-      .from('study_sessions')
-      .select('category_id, actual_duration_seconds, category:categories(name)')
-      .eq('user_id', userId)
-      .not('completed_at', 'is', null)
-      .gte('started_at', monthStart.toISOString());
-
-    const categoryTotals = new Map<string, { name: string; seconds: number }>();
-    for (const s of monthData ?? []) {
-      if (!s.category_id) continue;
-      const existing = categoryTotals.get(s.category_id);
-      const cat = s.category as { name: string } | { name: string }[] | null;
-      const name = (Array.isArray(cat) ? cat[0]?.name : cat?.name) ?? s.category_id;
-      categoryTotals.set(s.category_id, {
-        name,
-        seconds: (existing?.seconds ?? 0) + s.actual_duration_seconds,
-      });
-    }
-    const topCategoryThisMonth = categoryTotals.size > 0
-      ? [...categoryTotals.values()].sort((a, b) => b.seconds - a.seconds)[0].name
-      : null;
-
-    const { data: streakData } = await this.supabase
-      .from('study_sessions')
-      .select('started_at')
-      .eq('user_id', userId)
-      .not('completed_at', 'is', null)
+      .gte('started_at', from.toISOString())
       .order('started_at', { ascending: false });
-
-    const currentStreak = this.calculateStreak(streakData ?? []);
-
-    return { totalMinutesThisWeek, currentStreak, topCategoryThisMonth, dailyAverage };
+    if (error) this.handleError(error);
+    return (data ?? []) as StatsSession[];
   }
 
-  private calculateStreak(sessions: { started_at: string }[]): number {
-    if (sessions.length === 0) return 0;
-    const days = new Set(sessions.map((s) => s.started_at.slice(0, 10)));
-    const sorted = [...days].sort().reverse();
-    const today = new Date().toISOString().slice(0, 10);
-    if (sorted[0] !== today && sorted[0] !== new Date(Date.now() - 86400000).toISOString().slice(0, 10)) return 0;
+  async getStats(userId: string): Promise<SessionStats> {
+    const summary = summarize(await this.findForStats(userId));
 
-    let streak = 1;
-    for (let i = 1; i < sorted.length; i++) {
-      const prev = new Date(sorted[i - 1]);
-      const curr = new Date(sorted[i]);
-      const diffDays = Math.round((prev.getTime() - curr.getTime()) / 86400000);
-      if (diffDays === 1) streak++;
-      else break;
+    return {
+      totalMinutesThisWeek: summary.minutesThisWeek,
+      currentStreak: summary.currentStreak,
+      topCategoryThisMonth: summary.topCategoryThisMonth,
+      dailyAverage: summary.dailyAverage,
+    };
+  }
+
+  /**
+   * Segundos estudiados por tarea, para el usuario dado.
+   *
+   * PostgREST no expone `GROUP BY`, así que la agregación se hace aquí sobre
+   * las columnas mínimas. Solo se traen las sesiones completadas y con tarea
+   * —el índice parcial `sessions_task_idx` cubre exactamente ese filtro—, que
+   * son una fracción del historial: una sesión suelta no dice nada sobre
+   * ninguna tarea.
+   */
+  async studiedSecondsByTask(userId: string): Promise<Map<string, number>> {
+    const { data, error } = await this.supabase
+      .from('study_sessions')
+      .select('task_id, actual_duration_seconds')
+      .eq('user_id', userId)
+      .not('task_id', 'is', null)
+      .not('completed_at', 'is', null);
+    if (error) this.handleError(error);
+
+    const totals = new Map<string, number>();
+    for (const row of (data ?? []) as { task_id: string; actual_duration_seconds: number }[]) {
+      totals.set(row.task_id, (totals.get(row.task_id) ?? 0) + (row.actual_duration_seconds ?? 0));
     }
-    return streak;
+    return totals;
   }
 }

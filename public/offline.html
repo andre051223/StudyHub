@@ -5,18 +5,171 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>StudyHub — Sin conexión</title>
   <style>
-    body { margin: 0; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f8faf5; color: #1a2e0a; }
-    .card { text-align: center; padding: 2rem; }
-    .icon { width: 64px; height: 64px; background: #67b31f; border-radius: 16px; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem; color: white; font-size: 32px; font-weight: 700; }
-    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-    p { color: #6b7280; }
+    :root {
+      color-scheme: light dark;
+      --paper: #f8f9fa;
+      --surface: #ffffff;
+      --text: #1a1a1a;
+      --text-soft: #444444;
+      --muted: #6c757d;
+      --border: #e2e8f0;
+      --brand: #67b31f;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper: #11151c;
+        --surface: #1a1f29;
+        --text: #e8eaed;
+        --text-soft: #b4b9c2;
+        --muted: #9aa3b2;
+        --border: #2d3543;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--paper);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      line-height: 1.6;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
+    header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+    .logo {
+      width: 40px; height: 40px; flex: 0 0 auto;
+      background: var(--brand); border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-weight: 700; font-size: 20px;
+    }
+    h1 { font-size: 1.35rem; margin: 0; letter-spacing: -0.02em; }
+    .sub { color: var(--muted); font-size: 0.875rem; margin: 2px 0 0; }
+    .hint {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 14px 16px; margin-bottom: 24px;
+      color: var(--text-soft); font-size: 0.9rem;
+    }
+    .eyebrow {
+      font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.09em;
+      text-transform: uppercase; color: var(--muted); margin: 0 0 10px;
+    }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li + li { margin-top: 8px; }
+    details {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 12px 16px;
+    }
+    summary {
+      cursor: pointer; font-weight: 600; font-size: 0.95rem;
+      list-style: none; display: flex; align-items: baseline; gap: 10px;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: '▸'; color: var(--muted); margin-left: auto; }
+    details[open] summary::after { content: '▾'; }
+    .date { font-size: 0.75rem; font-weight: 400; color: var(--muted); }
+    .body {
+      margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+      color: var(--text-soft); font-size: 0.9rem; white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .empty { color: var(--muted); font-size: 0.9rem; }
+    button {
+      font: inherit; cursor: pointer; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text);
+      padding: 8px 16px; border-radius: 10px;
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="icon">S</div>
-    <h1>Sin conexión</h1>
-    <p>Reconéctate a internet para usar StudyHub.</p>
+  <div class="wrap">
+    <header>
+      <div class="logo">S</div>
+      <div>
+        <h1>Sin conexión</h1>
+        <p class="sub" id="sub">StudyHub no puede cargar la aplicación ahora mismo.</p>
+      </div>
+    </header>
+
+    <div class="hint">
+      Puedes leer los apuntes que se guardaron la última vez que abriste la
+      lista de notas. Para escribir, editar o ver tus tareas necesitas volver a
+      tener conexión.
+      <div style="margin-top: 12px">
+        <button onclick="location.reload()">Reintentar</button>
+      </div>
+    </div>
+
+    <p class="eyebrow" id="eyebrow">Tus notas guardadas</p>
+    <ul id="notes"></ul>
   </div>
+
+  <script>
+    // La copia la escribe la aplicación al cargar la lista de notas; el
+    // formato está documentado en lib/offline.ts. Esta página es HTML estático
+    // servido por el service worker: no puede consultar la base de datos, solo
+    // leer lo que quedó en el almacenamiento del navegador.
+    (function () {
+      var list = document.getElementById('notes');
+      var eyebrow = document.getElementById('eyebrow');
+      var sub = document.getElementById('sub');
+
+      var snapshot = null;
+      try {
+        snapshot = JSON.parse(localStorage.getItem('studyhub_offline_notes') || 'null');
+      } catch (e) {
+        snapshot = null;
+      }
+
+      if (!snapshot || !snapshot.notes || snapshot.notes.length === 0) {
+        eyebrow.textContent = '';
+        var empty = document.createElement('li');
+        empty.className = 'empty';
+        empty.textContent =
+          'Todavía no hay ninguna copia local. Abre la lista de notas con conexión y quedarán disponibles aquí.';
+        list.appendChild(empty);
+        return;
+      }
+
+      if (snapshot.savedAt) {
+        var when = new Date(snapshot.savedAt);
+        if (!isNaN(when)) {
+          sub.textContent =
+            'Copia guardada el ' +
+            when.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) +
+            ' a las ' +
+            when.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) +
+            '.';
+        }
+      }
+
+      snapshot.notes.forEach(function (note) {
+        var li = document.createElement('li');
+        var details = document.createElement('details');
+        var summary = document.createElement('summary');
+
+        // textContent y no innerHTML: el título viene de datos del usuario.
+        summary.appendChild(document.createTextNode(note.title || 'Sin título'));
+
+        if (note.updated_at) {
+          var d = new Date(note.updated_at);
+          if (!isNaN(d)) {
+            var span = document.createElement('span');
+            span.className = 'date';
+            span.textContent = d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
+            summary.appendChild(span);
+          }
+        }
+
+        var body = document.createElement('div');
+        body.className = 'body';
+        body.textContent = note.text ? note.text : 'Esta nota no tiene texto.';
+
+        details.appendChild(summary);
+        details.appendChild(body);
+        li.appendChild(details);
+        list.appendChild(li);
+      });
+    })();
+  </script>
 </body>
 </html>

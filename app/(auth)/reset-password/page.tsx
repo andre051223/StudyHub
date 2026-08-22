@@ -36,16 +36,25 @@ export default function ResetPasswordPage() {
     // aquí solo esperamos a que exista la sesión de recuperación.
     const params = new URLSearchParams(window.location.search);
     const hashParams = new URLSearchParams(window.location.hash.slice(1));
-    if (params.get('error') || hashParams.get('error')) {
-      setLinkState('invalid');
-      return;
-    }
+    const hasError = Boolean(params.get('error') || hashParams.get('error'));
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session) setLinkState('ready');
-    });
+    // El estado se resuelve siempre desde una callback asíncrona. Marcarlo de
+    // forma síncrona aquí encadenaba un render extra en cuanto se montaba la
+    // página (react-hooks/set-state-in-effect).
+    //
+    // Si el enlace ya viene con error no hay sesión que esperar, así que
+    // tampoco nos suscribimos a los cambios de auth.
+    const subscription = hasError
+      ? null
+      : supabase.auth.onAuthStateChange((_event, session) => {
+          if (session) setLinkState('ready');
+        }).data.subscription;
 
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (hasError) {
+        setLinkState('invalid');
+        return;
+      }
       if (session) {
         setLinkState('ready');
       } else if (!params.get('code')) {
@@ -60,7 +69,7 @@ export default function ResetPasswordPage() {
     }, 8000);
 
     return () => {
-      subscription.subscription.unsubscribe();
+      subscription?.unsubscribe();
       clearTimeout(timeout);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

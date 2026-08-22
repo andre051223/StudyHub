@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import type { Category } from '@/lib/types';
+import { Modal } from '@/components/shared/Modal';
 import { CategoryForm } from './CategoryForm';
 import { CategoryList } from './CategoryList';
 
@@ -66,33 +67,22 @@ export function CategoriesClient({ initialCategories }: Props) {
         onDeleted={handleDeleted}
       />
 
-      {/* Modal */}
+      {/* Modal compartido: el mismo <dialog> accesible que usa TaskModal. */}
       {modalState.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={closeModal}
-          />
-          <div className="relative z-10 bg-[var(--color-surface)] rounded-2xl shadow-xl w-full max-w-md p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-semibold text-[var(--color-text)]">
-                {modalState.editing ? 'Editar categoría' : 'Nueva categoría'}
-              </h2>
-              <button
-                onClick={closeModal}
-                className="p-1.5 text-[var(--color-gray-mid)] hover:bg-[var(--color-gray-light)] rounded-lg transition-colors"
-                aria-label="Cerrar"
-              >
-                <X size={18} />
-              </button>
-            </div>
+        <Modal
+          open
+          onClose={closeModal}
+          size="md"
+          title={modalState.editing ? 'Editar categoría' : 'Nueva categoría'}
+        >
+          <div className="p-6">
             <CategoryForm
               category={modalState.editing}
               onSuccess={handleSaved}
               onCancel={closeModal}
             />
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

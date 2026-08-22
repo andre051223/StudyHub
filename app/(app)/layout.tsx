@@ -1,6 +1,9 @@
 import { redirect } from 'next/navigation';
 import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import { Navbar } from '@/components/shared/Navbar';
+import { ConfirmProvider } from '@/components/shared/ConfirmProvider';
+import { CommandPalette } from '@/components/shared/CommandPalette';
+import { InstallPrompt } from '@/components/shared/InstallPrompt';
 
 export default async function AppLayout({
   children,
@@ -27,7 +30,16 @@ export default async function AppLayout({
         userEmail={user.email}
         userName={profile?.full_name ?? undefined}
       />
-      <div className="pt-[68px]">{children}</div>
+      <div className="pt-[68px]">
+        {/* Un solo diálogo de confirmación para toda el área autenticada.
+            Ver components/shared/ConfirmProvider.tsx. */}
+        <ConfirmProvider>
+          {children}
+          {/* Ctrl+K desde cualquier pantalla del área autenticada. */}
+          <CommandPalette />
+          <InstallPrompt />
+        </ConfirmProvider>
+      </div>
     </div>
   );
 }

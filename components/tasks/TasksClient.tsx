@@ -1,26 +1,45 @@
 'use client';
 
-import { useState, useOptimistic, useTransition } from 'react';
+import { useMemo, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   type DragStartEvent,
   type DragEndEvent,
   closestCorners,
 } from '@dnd-kit/core';
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { Plus, Filter } from 'lucide-react';
+import { arrayMove, sortableKeyboardCoordinates } from '@dnd-kit/sortable';
+import { Filter } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
+import {
+  createTaskAction,
+  updateTaskAction,
+  deleteTaskAction,
+  reorderTasksAction,
+} from '@/app/(app)/tasks/actions';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
+import { useMediaQuery, COMPACT_QUERY } from '@/hooks/useMediaQuery';
 import type { Task, TaskQuadrant, Category } from '@/lib/types';
 import { TaskCard } from './TaskCard';
 import { TaskModal } from './TaskModal';
 import { KanbanColumn } from './KanbanColumn';
 
-const QUADRANTS: { id: TaskQuadrant; label: string; color: string; bg: string }[] = [
+/**
+ * Paleta de los cuadrantes.
+ *
+ * «Planificar» era verde de marca, el mismo `#67b31f` que pintan todos los
+ * botones de acción del producto: en esta pantalla había un cuadrante entero
+ * del color que en el resto de la aplicación significa «pulsa aquí». Ahora los
+ * cuatro cuadrantes usan una escala propia por intensidad —rojo, índigo,
+ * ámbar, gris— y el verde queda reservado para las acciones.
+ */
+export const QUADRANTS: { id: TaskQuadrant; label: string; color: string; bg: string }[] = [
   {
     id: 'urgent_important',
     label: 'Hacer ahora',
@@ -30,14 +49,14 @@ const QUADRANTS: { id: TaskQuadrant; label: string; color: string; bg: string }[
   {
     id: 'not_urgent_important',
     label: 'Planificar',
-    color: 'text-[#67b31f] dark:text-[var(--color-primary-light)]',
-    bg: 'bg-[#67b31f0d] border-[#67b31f33] dark:bg-[#67b31f1a] dark:border-[#67b31f40]',
+    color: 'text-indigo-600 dark:text-indigo-400',
+    bg: 'bg-indigo-50 border-indigo-200 dark:bg-indigo-500/10 dark:border-indigo-500/25',
   },
   {
     id: 'urgent_not_important',
     label: 'Delegar',
-    color: 'text-yellow-600 dark:text-yellow-400',
-    bg: 'bg-yellow-50 border-yellow-200 dark:bg-yellow-500/10 dark:border-yellow-500/25',
+    color: 'text-amber-600 dark:text-amber-400',
+    bg: 'bg-amber-50 border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/25',
   },
   {
     id: 'not_urgent_not_important',
@@ -53,26 +72,46 @@ interface Props {
 }
 
 export function TasksClient({ initialTasks, categories }: Props) {
+  // Supabase directo solo para el cambio optimista de una sola fila y sin
+  // reglas: marcar completada. Crear, editar, borrar y reordenar pasan por
+  // Server Actions (ver app/(app)/tasks/actions.ts).
   const supabase = createClient();
+  const confirm = useConfirm();
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [modalTask, setModalTask] = useState<Task | null | 'new'>(null);
   const [newTaskQuadrant, setNewTaskQuadrant] = useState<TaskQuadrant>('not_urgent_important');
   const [filterCategoryId, setFilterCategoryId] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
-  const [, startTransition] = useTransition();
 
+  // En móvil los cuatro cuadrantes se ven a la vez en una rejilla 2×2 y se
+  // expande uno a pantalla completa al tocarlo. Ver la nota de `compactGrid`.
+  const isCompact = useMediaQuery(COMPACT_QUERY);
+  const [expandedQuadrant, setExpandedQuadrant] = useState<TaskQuadrant | null>(null);
+  const expanded = isCompact ? expandedQuadrant : null;
+
+  // MouseSensor y TouchSensor separados, no un PointerSensor único: con el
+  // umbral de 8 px que necesita el ratón, cualquier deslizamiento del dedo
+  // para hacer scroll dentro de una columna se interpretaba como arrastre. En
+  // táctil manda el tiempo (mantener pulsado), no la distancia.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const visibleTasks = useMemo(
+    () =>
+      tasks.filter((t) => {
+        if (!showCompleted && t.completed) return false;
+        if (filterCategoryId && t.category_id !== filterCategoryId) return false;
+        return true;
+      }),
+    [tasks, showCompleted, filterCategoryId]
   );
 
   function getFilteredTasks(quadrant: TaskQuadrant) {
-    return tasks.filter((t) => {
-      if (t.quadrant !== quadrant) return false;
-      if (!showCompleted && t.completed) return false;
-      if (filterCategoryId && t.category_id !== filterCategoryId) return false;
-      return true;
-    });
+    return visibleTasks.filter((t) => t.quadrant === quadrant);
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -80,101 +119,143 @@ export function TasksClient({ initialTasks, categories }: Props) {
     if (task) setActiveTask(task);
   }
 
+  /**
+   * Reconstruye la lista con un cuadrante entero reordenado.
+   *
+   * Las columnas se pintan filtrando `tasks` en el orden del array, así que no
+   * basta con escribir `position`: hay que dejar el array en ese mismo orden.
+   */
+  function applyOrder(prev: Task[], quadrant: TaskQuadrant, ordered: Task[]): Task[] {
+    const reordered = new Map(
+      ordered.map((t, position) => [t.id, { ...t, quadrant, position }])
+    );
+    return [...prev.filter((t) => !reordered.has(t.id)), ...reordered.values()];
+  }
+
   async function handleDragEnd(event: DragEndEvent) {
     setActiveTask(null);
     const { active, over } = event;
     if (!over) return;
 
-    const activeTask = tasks.find((t) => t.id === active.id);
-    if (!activeTask) return;
+    const moved = tasks.find((t) => t.id === active.id);
+    if (!moved) return;
 
-    const overId = over.id as string;
-    const overQuadrant = QUADRANTS.find((q) => q.id === overId);
+    const overId = String(over.id);
+    const overQuadrant = QUADRANTS.find((q) => q.id === overId)?.id;
     const overTask = tasks.find((t) => t.id === overId);
-    const targetQuadrant = overQuadrant?.id ?? overTask?.quadrant ?? activeTask.quadrant;
+    const target = overQuadrant ?? overTask?.quadrant ?? moved.quadrant;
 
-    if (targetQuadrant === activeTask.quadrant) return;
+    // El orden se calcula sobre *todas* las tareas del cuadrante, no solo
+    // sobre las visibles: si hay un filtro activo, las ocultas también tienen
+    // posición y reescribir únicamente las visibles las descolocaría.
+    const quadrantTasks = tasks.filter((t) => t.quadrant === target);
+    let ordered: Task[];
 
-    // Optimistic update
-    setTasks((prev) =>
-      prev.map((t) => (t.id === activeTask.id ? { ...t, quadrant: targetQuadrant } : t))
-    );
+    if (target === moved.quadrant) {
+      const from = quadrantTasks.findIndex((t) => t.id === moved.id);
+      const to = overTask
+        ? quadrantTasks.findIndex((t) => t.id === overTask.id)
+        : quadrantTasks.length - 1;
+      if (to === -1 || from === to) return;
+      ordered = arrayMove(quadrantTasks, from, to);
+    } else {
+      const at = overTask
+        ? quadrantTasks.findIndex((t) => t.id === overTask.id)
+        : quadrantTasks.length;
+      const insertAt = at === -1 ? quadrantTasks.length : at;
+      ordered = [
+        ...quadrantTasks.slice(0, insertAt),
+        moved,
+        ...quadrantTasks.slice(insertAt),
+      ];
+    }
 
-    const { error } = await supabase
-      .from('tasks')
-      .update({ quadrant: targetQuadrant })
-      .eq('id', activeTask.id);
+    const previous = tasks;
+    setTasks((prev) => applyOrder(prev, target, ordered));
 
-    if (error) {
-      toast.error('Error al mover la tarea');
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === activeTask.id ? { ...t, quadrant: activeTask.quadrant } : t
-        )
-      );
+    const result = await reorderTasksAction({
+      quadrant: target,
+      orderedIds: ordered.map((t) => t.id),
+    });
+
+    if (!result.ok) {
+      setTasks(previous);
+      toast.error(result.error);
     }
   }
 
   async function handleToggleComplete(taskId: string, completed: boolean) {
+    const previous = tasks;
+    const completedAt = completed ? new Date().toISOString() : null;
+
     setTasks((prev) =>
-      prev.map((t) =>
-        t.id === taskId
-          ? { ...t, completed, completed_at: completed ? new Date().toISOString() : null }
-          : t
-      )
+      prev.map((t) => (t.id === taskId ? { ...t, completed, completed_at: completedAt } : t))
     );
 
-    await supabase
+    const { error } = await supabase
       .from('tasks')
-      .update({
-        completed,
-        completed_at: completed ? new Date().toISOString() : null,
-      })
+      .update({ completed, completed_at: completedAt })
       .eq('id', taskId);
+
+    if (error) {
+      setTasks(previous);
+      toast.error('No se pudo actualizar la tarea');
+    }
   }
 
   async function handleDeleteTask(taskId: string) {
+    const task = tasks.find((t) => t.id === taskId);
+    const ok = await confirm({
+      title: '¿Eliminar la tarea?',
+      message: task
+        ? `«${task.title}» y sus subtareas se eliminarán definitivamente.`
+        : 'La tarea y sus subtareas se eliminarán definitivamente.',
+    });
+    if (!ok) return;
+
+    const previous = tasks;
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
-    await supabase.from('tasks').delete().eq('id', taskId);
+
+    const result = await deleteTaskAction(taskId);
+    if (!result.ok) {
+      setTasks(previous);
+      toast.error(result.error);
+      return;
+    }
+    // El modal de la tarea eliminada se cierra desde aquí y no desde el propio
+    // modal: si la confirmación se cancela, debe quedarse abierto.
+    setModalTask(null);
     toast.success('Tarea eliminada');
   }
 
   async function handleSaveTask(data: Partial<Task>) {
     if (!data.id) {
-      // Create
-      const { data: created, error } = await supabase
-        .from('tasks')
-        .insert({
-          title: data.title!,
-          description: data.description ?? null,
-          quadrant: data.quadrant ?? newTaskQuadrant,
-          deadline: data.deadline ?? null,
-          category_id: data.category_id ?? null,
-          position: tasks.filter((t) => t.quadrant === (data.quadrant ?? newTaskQuadrant)).length,
-        })
-        .select('*, category:categories(*)')
-        .single();
+      // TaskModel calcula la position inicial dentro del cuadrante y recorta
+      // el título; por eso la creación no arma la fila aquí.
+      const result = await createTaskAction({
+        title: data.title,
+        description: data.description ?? null,
+        quadrant: data.quadrant ?? newTaskQuadrant,
+        deadline: data.deadline ?? null,
+        category_id: data.category_id ?? null,
+      });
 
-      if (error) { toast.error('Error al crear tarea'); return; }
-      setTasks((prev) => [...prev, created as Task]);
+      if (!result.ok) { toast.error(result.error); return; }
+      setTasks((prev) => [...prev, result.data]);
       toast.success('Tarea creada');
     } else {
-      // Update
-      const { data: updated, error } = await supabase
-        .from('tasks')
-        .update({
-          title: data.title,
-          description: data.description,
-          quadrant: data.quadrant,
-          deadline: data.deadline,
-          category_id: data.category_id,
-        })
-        .eq('id', data.id)
-        .select('*, category:categories(*)')
-        .single();
+      const result = await updateTaskAction(data.id, {
+        title: data.title,
+        description: data.description ?? null,
+        quadrant: data.quadrant,
+        deadline: data.deadline ?? null,
+        category_id: data.category_id ?? null,
+      });
 
-      if (error) { toast.error('Error al actualizar tarea'); return; }
-      setTasks((prev) => prev.map((t) => (t.id === data.id ? (updated as Task) : t)));
+      if (!result.ok) { toast.error(result.error); return; }
+      // El modelo devuelve la tarea con sus subtareas; conservarlas evita que
+      // el contador de la tarjeta parpadee tras guardar.
+      setTasks((prev) => prev.map((t) => (t.id === data.id ? result.data : t)));
       toast.success('Tarea actualizada');
     }
     setModalTask(null);
@@ -185,14 +266,31 @@ export function TasksClient({ initialTasks, categories }: Props) {
     setModalTask('new');
   }
 
+  const visibleQuadrants = expanded
+    ? QUADRANTS.filter((q) => q.id === expanded)
+    : QUADRANTS;
+
+  /**
+   * En pantallas anchas la matriz es una fila de cuatro columnas de 288 px con
+   * desplazamiento horizontal. En un móvil eso mostraba una columna y un
+   * cuarto, y la matriz de Eisenhower solo comunica su idea si se ven los
+   * cuatro cuadrantes a la vez: en compacto pasa a una rejilla 2×2 con
+   * tarjetas resumidas, y se expande un cuadrante a pantalla completa al tocar
+   * su cabecera.
+   */
+  const compactLayout = expanded
+    ? 'flex flex-col p-3 h-full'
+    : 'grid grid-cols-2 grid-rows-2 gap-2 p-3 h-full';
+
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col min-h-0">
       {/* Filters bar */}
-      <div className="flex items-center gap-3 px-6 py-3 bg-[var(--color-surface)] border-b border-[var(--color-gray-border)] flex-wrap">
+      <div className="flex items-center gap-3 px-4 md:px-6 py-3 bg-[var(--color-surface)] border-b border-[var(--color-gray-border)] flex-wrap">
         <Filter size={15} className="text-[var(--color-gray-mid)]" />
         <select
           value={filterCategoryId ?? ''}
           onChange={(e) => setFilterCategoryId(e.target.value || null)}
+          aria-label="Filtrar por categoría"
           className="text-sm border border-[var(--color-gray-border)] rounded-lg px-3 py-1.5 text-[var(--color-text-soft)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
         >
           <option value="">Todas las categorías</option>
@@ -214,27 +312,34 @@ export function TasksClient({ initialTasks, categories }: Props) {
       </div>
 
       {/* Kanban */}
-      <div className="flex-1 overflow-x-auto">
+      <div className={`flex-1 min-h-0 ${isCompact ? 'overflow-y-auto' : 'overflow-x-auto'}`}>
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex gap-4 p-6 min-w-[900px] h-full">
-            {QUADRANTS.map((quadrant) => {
-              const columnTasks = getFilteredTasks(quadrant.id);
-              return (
-                <KanbanColumn
-                  key={quadrant.id}
-                  quadrant={quadrant}
-                  tasks={columnTasks}
-                  onAddTask={() => openNewTask(quadrant.id)}
-                  onCardClick={(task) => setModalTask(task)}
-                  onToggleComplete={handleToggleComplete}
-                />
-              );
-            })}
+          <div className={isCompact ? compactLayout : 'flex gap-4 p-6 min-w-[900px] h-full'}>
+            {visibleQuadrants.map((quadrant) => (
+              <KanbanColumn
+                key={quadrant.id}
+                quadrant={quadrant}
+                tasks={getFilteredTasks(quadrant.id)}
+                compact={isCompact && !expanded}
+                expanded={expanded === quadrant.id}
+                onToggleExpand={
+                  isCompact
+                    ? () =>
+                        setExpandedQuadrant((prev) =>
+                          prev === quadrant.id ? null : quadrant.id
+                        )
+                    : undefined
+                }
+                onAddTask={() => openNewTask(quadrant.id)}
+                onCardClick={(task) => setModalTask(task)}
+                onToggleComplete={handleToggleComplete}
+              />
+            ))}
           </div>
 
           <DragOverlay>

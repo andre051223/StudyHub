@@ -1,47 +1,61 @@
 import { NextRequest } from 'next/server';
 import { FolderModel } from '@/lib/models';
-import { getAuthContext, ok, err } from '@/lib/api/helpers';
+import { updateFolderSchema, uuid } from '@/lib/api/schemas';
+import { getAuthContext, parseBody, isResponse, ok, err, errorResponse } from '@/lib/api/helpers';
+
+/** Valida el segmento de ruta antes de tocar la base. */
+async function resolveId(params: Promise<{ id: string }>) {
+  const { id } = await params;
+  return uuid.safeParse(id).success ? id : null;
+}
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await getAuthContext();
-  if ('status' in ctx) return ctx;
+  if (isResponse(ctx)) return ctx;
 
-  const { id } = await params;
+  const id = await resolveId(params);
+  if (!id) return err('Identificador inválido.', 400);
+
   try {
     const model = new FolderModel(ctx.supabase);
-    const folder = await model.findById(id, ctx.userId);
-    if (!folder) return err('Carpeta no encontrada', 404);
-    return ok(folder);
+    const item = await model.findById(id, ctx.userId);
+    if (!item) return err('Carpeta no encontrada', 404);
+    return ok(item);
   } catch (e) {
-    return err((e as Error).message);
+    return errorResponse(e);
   }
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await getAuthContext();
-  if ('status' in ctx) return ctx;
+  if (isResponse(ctx)) return ctx;
 
-  const { id } = await params;
+  const id = await resolveId(params);
+  if (!id) return err('Identificador inválido.', 400);
+
+  const body = await parseBody(req, updateFolderSchema);
+  if (isResponse(body)) return body;
+
   try {
-    const body = await req.json();
     const model = new FolderModel(ctx.supabase);
-    const folder = await model.update(id, body, ctx.userId);
-    return ok(folder);
+    return ok(await model.update(id, body.data, ctx.userId));
   } catch (e) {
-    return err((e as Error).message);
+    return errorResponse(e);
   }
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await getAuthContext();
-  if ('status' in ctx) return ctx;
+  if (isResponse(ctx)) return ctx;
 
-  const { id } = await params;
+  const id = await resolveId(params);
+  if (!id) return err('Identificador inválido.', 400);
+
   try {
     const model = new FolderModel(ctx.supabase);
     await model.delete(id, ctx.userId);
     return ok({ deleted: true });
   } catch (e) {
-    return err((e as Error).message);
+    return errorResponse(e);
   }
 }

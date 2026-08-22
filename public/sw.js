@@ -5,8 +5,13 @@
 // dejaba en caché HTML de rutas autenticadas (/dashboard) que podía servirse
 // después con datos de otra sesión.
 //
+// v3: la página offline dejó de ser un cartel de "sin conexión" y ahora lista
+// los apuntes guardados en el navegador (ver lib/offline.ts). Subir la versión
+// es obligatorio: el handler `activate` borra el caché anterior y así la
+// versión vieja de offline.html no se queda servida para siempre.
+//
 // Cambiar el nombre del caché hace que el handler `activate` borre el anterior.
-const CACHE = 'studyhub-v2';
+const CACHE = 'studyhub-v3';
 const OFFLINE_URL = '/offline.html';
 
 self.addEventListener('install', (event) => {

@@ -3,18 +3,22 @@
 import { useState, useMemo } from 'react';
 import { Flame, Target, CheckCircle2, Edit2, X, Save } from 'lucide-react';
 import { toast } from 'sonner';
-import { createClient } from '@/lib/supabase/client';
-import { startOfDay, subDays, startOfWeek } from 'date-fns';
-import type { StudySession } from '@/lib/types';
+import { updateGoalsAction } from '@/app/(app)/timer/actions';
+import {
+  onlyCompleted,
+  minutesOnDay,
+  minutesSinceMonday,
+  currentStreak,
+  type StatsSession,
+} from '@/lib/stats';
 
 interface Props {
-  sessions: (StudySession & { category?: { name: string; color: string } | null })[];
+  sessions: StatsSession[];
   dailyGoal: number;
   weeklyGoal: number;
 }
 
 export function StudyGoals({ sessions, dailyGoal: initialDaily, weeklyGoal: initialWeekly }: Props) {
-  const supabase = createClient();
   const [editing, setEditing] = useState(false);
   const [dailyGoal, setDailyGoal] = useState(initialDaily);
   const [weeklyGoal, setWeeklyGoal] = useState(initialWeekly);
@@ -24,58 +28,33 @@ export function StudyGoals({ sessions, dailyGoal: initialDaily, weeklyGoal: init
 
   const stats = useMemo(() => {
     const now = new Date();
-    const todayStr = startOfDay(now).toISOString().slice(0, 10);
-    const weekStart = startOfWeek(now, { weekStartsOn: 1 });
+    const completed = onlyCompleted(sessions);
 
-    const completed = sessions.filter((s) => s.completed_at !== null);
-
-    const todayMinutes = completed
-      .filter((s) => s.started_at.slice(0, 10) === todayStr)
-      .reduce((acc, s) => acc + s.duration_minutes, 0);
-
-    const weekMinutes = completed
-      .filter((s) => new Date(s.started_at) >= weekStart)
-      .reduce((acc, s) => acc + s.duration_minutes, 0);
-
-    // Streak: consecutive days with at least one completed session
-    const uniqueDates = [...new Set(completed.map((s) => s.started_at.slice(0, 10)))].sort(
-      (a, b) => b.localeCompare(a)
-    );
-
-    let streak = 0;
-    if (uniqueDates.length > 0) {
-      const yesterday = subDays(startOfDay(now), 1).toISOString().slice(0, 10);
-      if (uniqueDates[0] === todayStr || uniqueDates[0] === yesterday) {
-        for (let i = 0; i < uniqueDates.length; i++) {
-          const expected = subDays(startOfDay(now), i + (uniqueDates[0] === yesterday ? 1 : 0))
-            .toISOString()
-            .slice(0, 10);
-          if (uniqueDates[i] !== expected) break;
-          streak++;
-        }
-      }
-    }
-
-    return { todayMinutes, weekMinutes, streak };
+    return {
+      todayMinutes: minutesOnDay(completed, now),
+      // La meta semanal se compara contra la semana natural (desde el lunes),
+      // no contra los últimos 7 días: es lo que espera quien se fija una meta.
+      weekMinutes: minutesSinceMonday(completed, now),
+      streak: currentStreak(completed, now),
+    };
   }, [sessions]);
 
   async function handleSave() {
-    if (tempDaily < 5 || tempDaily > 480 || tempWeekly < 30 || tempWeekly > 2400) {
-      toast.error('Valores fuera de rango');
-      return;
-    }
     setSaving(true);
-    const { error } = await supabase
-      .from('profiles')
-      .update({ daily_goal_minutes: tempDaily, weekly_goal_minutes: tempWeekly })
-      .eq('id', (await supabase.auth.getUser()).data.user!.id);
+    // Los rangos los comprueba updateGoalsSchema, que replica los CHECK de la
+    // migración 003. Antes se validaban aquí a mano con los números repetidos.
+    const result = await updateGoalsAction({
+      daily_goal_minutes: tempDaily,
+      weekly_goal_minutes: tempWeekly,
+    });
     setSaving(false);
-    if (error) {
-      toast.error('Error al guardar las metas');
+
+    if (!result.ok) {
+      toast.error(result.error);
       return;
     }
-    setDailyGoal(tempDaily);
-    setWeeklyGoal(tempWeekly);
+    setDailyGoal(result.data.daily_goal_minutes);
+    setWeeklyGoal(result.data.weekly_goal_minutes);
     setEditing(false);
     toast.success('Metas actualizadas');
   }

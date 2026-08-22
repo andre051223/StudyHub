@@ -52,15 +52,22 @@ La app está en español y su color de marca es el verde `#67b31f`.
 | Toasts | **sonner** | `<Toaster>` montado en el layout raíz |
 | SOAP | **node-soap** | servicio SOAP de solo lectura (ver §6.3) |
 | Utilidades CSS | `clsx` + `tailwind-merge` | helper `cn()` en `lib/utils.ts` |
+| Tests | **Vitest 4** | `vitest.config.mts`; cubre `lib/**/*.test.ts` |
 
 **Scripts** (`package.json`):
 
 ```
-npm run dev     # next dev
-npm run build   # next build
-npm run start   # next start
-npm run lint    # eslint
+npm run dev         # next dev
+npm run build       # next build
+npm run start       # next start
+npm run lint        # eslint
+npm run test        # vitest run
+npm run test:watch  # vitest
 ```
+
+> Los tests corren con `TZ=America/Bogota` fijado en `vitest.config.mts`. Es
+> deliberado: una zona con offset negativo es la que destapa los errores de
+> agrupar días en UTC (ver §5.6).
 
 ---
 
@@ -117,8 +124,14 @@ StudyHub/
 │   │   ├── forgot-password/page.tsx
 │   │   └── reset-password/page.tsx
 │   ├── (app)/                        # Rutas protegidas (requieren sesión)
-│   │   ├── layout.tsx                # Verifica sesión (redirect a /login) + Navbar
-│   │   ├── dashboard/page.tsx        # Resumen general
+│   │   ├── layout.tsx                # Verifica sesión (redirect a /login) + Navbar,
+│   │   │                             # ConfirmProvider, paleta Ctrl+K, aviso de instalación
+│   │   ├── actions.ts                # Server Action de búsqueda global (Ctrl+K)
+│   │   ├── dashboard/page.tsx        # Resumen del día: metas, racha, qué vence hoy
+│   │   ├── agenda/page.tsx           # Fechas límite, semana a semana
+│   │   ├── tasks/actions.ts          # Server Actions de tareas y subtareas
+│   │   ├── timer/actions.ts          # Server Actions de sesiones y metas
+│   │   ├── profile/actions.ts        # Server Action de perfil
 │   │   ├── notes/
 │   │   │   ├── page.tsx              # Lista de carpetas/notas
 │   │   │   └── [noteId]/page.tsx     # Editor de nota individual (Tiptap)
@@ -137,17 +150,21 @@ StudyHub/
 │   │   └── soap/route.ts             # Endpoint SOAP (GET=WSDL, POST=operación)
 │   ├── icons/                        # icon-192, icon-512 (rutas dinámicas PWA)
 │   ├── icon.tsx / apple-icon.tsx     # Favicons generados
-│   ├── manifest.ts                   # Web App Manifest (PWA)
+│   ├── manifest.ts                   # Web App Manifest (PWA: iconos, capturas, accesos)
+│   ├── screenshots/[variant]/route.tsx # Capturas del manifest generadas con ImageResponse
 │   ├── layout.tsx                    # Layout raíz (theme init, fuente, Toaster, SW)
 │   ├── page.tsx                      # Landing pública
 │   └── globals.css                   # Tokens de tema + estilos Tiptap
 ├── components/
+│   ├── agenda/                       # AgendaClient (vista semanal de fechas límite)
+│   ├── dashboard/                    # TodayStats, DueToday, LocalDate
 │   ├── landing/                      # ShowcaseSection, mockups
 │   ├── notes/                        # NotesClient, NoteEditor
 │   ├── tasks/                        # TasksClient, KanbanColumn, TaskCard, TaskModal
 │   ├── timer/                        # TimerClient, MiniTimer, SessionHistory, StudyStats, StudyGoals
 │   ├── categories/                   # CategoriesClient, CategoryForm, CategoryList
-│   └── shared/                       # Navbar, ThemeToggle, ProfileClient, ServiceWorkerRegistrar, CategoriesClient
+│   └── shared/                       # Navbar, ThemeToggle, ProfileClient, ServiceWorkerRegistrar,
+│                                     # Modal, ConfirmProvider, CommandPalette, InstallPrompt
 ├── lib/
 │   ├── supabase/
 │   │   ├── client.ts                 # Cliente para Client Components (browser)
@@ -156,24 +173,39 @@ StudyHub/
 │   ├── models/                       # Capa de modelos OOP (ver §5)
 │   │   ├── BaseModel.ts              # Clase base + ModelError
 │   │   ├── CategoryModel.ts · TaskModel.ts · FolderModel.ts · NoteModel.ts · SessionModel.ts
+│   │   ├── SearchModel.ts            # Búsqueda global (RPC search_everything)
 │   │   └── index.ts                  # Reexporta modelos y sus tipos Create/Update
 │   ├── services/
 │   │   └── StudyHubSoapService.ts    # Lógica de negocio expuesta por SOAP
 │   ├── api/
-│   │   └── helpers.ts                # getAuthContext(), ok(), err()
+│   │   ├── helpers.ts                # getAuthContext(), parseBody(), ok(), errorResponse()
+│   │   ├── schemas.ts                # Esquemas Zod compartidos (API + actions + formularios)
+│   │   └── actions.ts                # ActionResult, requireUser(), parseInput()
+│   ├── stats.ts                      # ÚNICA fuente de las métricas de estudio (ver §5.6)
+│   ├── stats.test.ts                 # Tests de lib/stats.ts (vitest)
+│   ├── deadlines.ts                  # Lectura de tasks.deadline (fecha de calendario en UTC)
+│   ├── deadlines.test.ts             # Tests de lib/deadlines.ts (vitest)
+│   ├── offline.ts                    # Copia local de las notas para leerlas sin conexión
 │   ├── types.ts                      # Tipos de dominio compartidos (Profile, Note, Task, …)
 │   └── utils.ts                      # cn() y utilidades
+├── hooks/
+│   └── useMediaQuery.ts              # Suscripción a media queries (rejilla 2×2 del Kanban)
 ├── public/
 │   ├── studyhub.wsdl                 # Contrato del servicio SOAP
 │   └── sounds/bell.wav               # Sonido al completar una sesión
+├── proxy.ts                          # Middleware raíz (nombre de Next 16) → updateSession()
+├── vitest.config.mts                 # Config de tests (fija TZ=America/Bogota)
 └── supabase/
-    └── migrations/                   # 001_initial · 002_categories_constraints · 003_user_goals · 004_stopwatch_mode
+    └── migrations/                   # 001_initial · 002_categories_constraints · 003_user_goals
+                                      # 004_stopwatch_mode · 005_data_integrity
+                                      # 006_task_sessions · 007_global_search · 008_onboarding
 ```
 
-> Nota: **no hay `middleware.ts` en la raíz** y **no hay `tailwind.config.ts`**. El guard de
-> rutas efectivo se hace en el Server Component `app/(app)/layout.tsx` (ver §7). El helper
-> `lib/supabase/middleware.ts` (`updateSession`) implementa refresco de sesión + guard y está
-> disponible para cablearse en un middleware raíz si se necesita.
+> Nota: **no hay `tailwind.config.ts`** (Tailwind v4 se configura vía `@theme` en
+> `globals.css`). El guard de rutas se aplica en **dos** capas: `proxy.ts` en la raíz —que es
+> como Next 16 llama al antiguo `middleware.ts`— delega en `updateSession()` de
+> `lib/supabase/middleware.ts` para refrescar la cookie de sesión y redirigir, y el Server
+> Component `app/(app)/layout.tsx` vuelve a comprobar la sesión antes de renderizar (ver §7).
 
 ---
 
@@ -191,30 +223,91 @@ separación.**
    - `CategoryModel`, `TaskModel` (+ subtareas), `FolderModel`, `NoteModel`, `SessionModel`.
    - Todas las queries filtran por `user_id`; RLS en la base es la segunda línea de defensa.
 
-2. **Capa de API REST (`app/api/**/route.ts`) — HTTP sobre los modelos.**
-   Cada recurso tiene su colección (`route.ts`) y su item (`[id]/route.ts`).
-   Patrón estándar de cada handler:
-   - `getAuthContext()` (de `lib/api/helpers.ts`) obtiene `{ supabase, userId }` o devuelve
-     `401` si no hay sesión.
-   - Validar el body con **Zod**.
-   - Instanciar el modelo correspondiente y delegar.
-   - Responder con `ok(data)` / `err(msg, status)`.
+2. **Esquemas de validación (`lib/api/schemas.ts`) — fuente única.**
+   Todos los esquemas Zod de entrada viven aquí y los comparten los route handlers, las
+   Server Actions y los formularios. **No duplicar un esquema en un componente**: importarlo.
 
-3. **Servicio SOAP (`app/api/soap/route.ts` + `lib/services/StudyHubSoapService.ts`).**
+3. **Capa de API REST (`app/api/**/route.ts`) — HTTP sobre los modelos.**
+   Superficie de integración externa; la UI **no** la consume (ver §5.5).
+   Cada recurso tiene su colección (`route.ts`) y su item (`[id]/route.ts`).
+   Patrón obligatorio de cada handler:
+   - `getAuthContext()` (de `lib/api/helpers.ts`) obtiene `{ supabase, userId }` o devuelve
+     `401` si no hay sesión. Se comprueba con `isResponse(ctx)`.
+   - `parseBody(req, esquema)` valida el cuerpo con **Zod** y devuelve `400` con
+     `fieldErrors` si no encaja. Los handlers de item validan además que el `[id]` sea un UUID.
+   - Instanciar el modelo correspondiente y delegar.
+   - Responder con `ok(data)`; los fallos pasan por `errorResponse(e)`, que traduce la
+     excepción al código HTTP correcto (404 / 409 / 400 / 500) y **no reenvía al cliente los
+     mensajes crudos de Postgres**.
+
+4. **Servicio SOAP (`app/api/soap/route.ts` + `lib/services/StudyHubSoapService.ts`).**
    Endpoint interoperable de **solo lectura** que reutiliza los modelos. Ver §6.3.
 
-4. **Server Actions (`app/(app)/categories/actions.ts`).**
-   Mutaciones de categorías vía Server Actions (además de la API REST).
+5. **Server Actions (`app/(app)/<ruta>/actions.ts`).**
+   El camino de escritura de la UI. Ver §5.5.
 
-5. **Capa de UI.**
+6. **Capa de UI.**
    - **Server Components** por defecto (páginas en `app/`): hacen el fetch inicial con el
      cliente de servidor (`lib/supabase/server.ts`) y pasan datos a componentes cliente.
-   - **Client Components** (`*Client.tsx`, con `'use client'`): interactividad, estado local,
-     optimistic updates, y llamadas a la API REST. Usan `lib/supabase/client.ts` cuando
-     necesitan Supabase en el navegador (p. ej. subida de imágenes, auth).
+   - **Client Components** (`*Client.tsx`, con `'use client'`): interactividad, estado local
+     y optimistic updates. Escriben vía Server Actions o, para lo trivial, con
+     `lib/supabase/client.ts` (ver §5.5).
+
+### 5.5 Cómo escribe la UI: Server Actions vs. Supabase directo
+
+Durante un tiempo convivieron dos caminos de escritura sin criterio: los modelos y la API
+REST existían, pero **ninguna** escritura de la interfaz pasaba por ellos —los componentes
+insertaban directo contra Supabase—, así que las reglas de negocio de `lib/models/` no
+llegaban a ejecutarse nunca. La regla ahora es explícita:
+
+| Operación | Camino | Por qué |
+|-----------|--------|---------|
+| Crear/editar/borrar tarea, subtarea | **Server Action** (`tasks/actions.ts`) | `TaskModel` recorta el título, calcula `position` y comprueba pertenencia |
+| Guardar sesión de estudio | **Server Action** (`timer/actions.ts`) | `SessionModel` valida el rango según el modo |
+| Metas de estudio, perfil | **Server Action** | rangos y longitudes que replican los CHECK de la base |
+| CRUD de categorías | **Server Action** (`categories/actions.ts`) | unicidad, longitud y color hex |
+| Marcar tarea completada, mover de cuadrante | Supabase directo | cambio de estado sin reglas; el viaje extra solo añadiría latencia al arrastre |
+| Marcar/borrar subtarea | Supabase directo | ídem |
+| Autoguardado de nota, subida de imágenes | Supabase directo | alta frecuencia (cada segundo al escribir) y Storage es del cliente |
+| Crear/borrar nota y carpeta | Supabase directo | solo aplica valores por defecto |
+
+**Al añadir una escritura nueva:** si toca una regla de negocio, va por Server Action y la
+regla vive en el modelo. Si es un flip de estado, va directa. Ante la duda, Server Action.
+
+Las Server Actions **no lanzan** hacia el cliente: devuelven `ActionResult<T>`
+(`lib/api/actions.ts`), un resultado discriminado con `error` y `fieldErrors`. Una excepción
+en una Server Action llega al navegador como un error opaco en producción, así que los fallos
+previsibles se modelan como datos. Helpers disponibles: `requireUser()`, `parseInput()`,
+`actionOk()`, `actionErr()` y `actionError()`.
+
+7. **Métricas de estudio (`lib/stats.ts`) — fuente única.**
+   Ver §5.6. **Ninguna pantalla debe calcular métricas de estudio por su cuenta.**
 
 **Tipos de dominio** compartidos en `lib/types.ts`: `Profile`, `Folder`, `Note`, `Task`,
 `Subtask`, `Category`, `TaskQuadrant`, `StudySession`, `StudyMode`, `TimerState`.
+
+### 5.6 Métricas de estudio: `lib/stats.ts`
+
+Todas las métricas (minutos por semana, racha, promedio diario, buckets diarios, totales por
+categoría) viven en `lib/stats.ts` y las consumen el dashboard, `StudyStats`, `StudyGoals` y
+`SessionModel.getStats()` (que a su vez alimenta SOAP). Antes cada pantalla tenía su propia
+versión y las cuatro devolvían números distintos para la misma semana.
+
+Dos reglas que el módulo hace cumplir y que **hay que respetar al añadir métricas nuevas**:
+
+- **Usar `actual_duration_seconds`, nunca `duration_minutes`.** `duration_minutes` es la
+  duración *planeada* (y es `null` en modo cronómetro); solo `actual_duration_seconds` refleja
+  lo que se estudió de verdad.
+- **Agrupar días con `localDayKey()`, nunca con `toISOString().slice(0, 10)`.** El segundo
+  convierte a UTC primero, así que en UTC−5 una sesión de las 19:30 se contaba como del día
+  siguiente: rompía la gráfica diaria, la meta diaria y la racha.
+
+Las funciones son puras y reciben `now` por parámetro, así que se prueban con fecha fija.
+`lib/stats.test.ts` cubre ambas reglas con tests de regresión explícitos.
+
+Las sesiones para estadísticas se traen con `SessionModel.findForStats()` (último año, columnas
+mínimas), **no** con el `limit(50)` del historial: derivar la racha de esa ventana la cortaba
+en seco a partir de la sesión 51.
 
 ---
 
@@ -223,6 +316,11 @@ separación.**
 Migraciones en `supabase/migrations/` (aplicar en orden en el SQL Editor de Supabase).
 **Todas las tablas tienen RLS activado**; las políticas restringen el acceso a los registros
 propios (`auth.uid() = user_id`, o el equivalente para `subtasks` vía la tarea padre).
+
+Desde la **migración 005** las políticas son granulares (`SELECT`/`INSERT`/`UPDATE`/`DELETE`)
+con `WITH CHECK` explícito en las de escritura, y `user_id` tiene `DEFAULT auth.uid()` en las
+cinco tablas de usuario. Aun así, **los clientes envían `user_id` explícitamente** al insertar:
+así el código no depende de un detalle del esquema y RLS sigue siendo quien verifica.
 
 ### 6.1 Tablas
 
@@ -287,8 +385,8 @@ RLS por pertenencia a la tarea del usuario.
 | id | uuid (PK) | |
 | user_id | uuid (FK) | |
 | category_id | uuid (FK, SET NULL) | nullable |
-| duration_minutes | integer | CHECK 1–120 en DB; el modelo valida 10–120 al crear |
-| actual_duration_seconds | integer | tiempo real transcurrido |
+| duration_minutes | integer | **nullable** · duración *planeada*; `null` en modo cronómetro. CHECK 1–1440 · el modelo valida 10–120 solo para `simple` · *migración 005* |
+| actual_duration_seconds | integer | tiempo real transcurrido · CHECK ≥ 0 · **la métrica que usan todas las estadísticas** |
 | mode | enum `study_mode` | `simple`, `pomodoro` (legado), `stopwatch` · *migración 004* |
 | pomodoro_cycles_completed | integer | default 0 |
 | started_at | timestamptz | |
@@ -305,11 +403,17 @@ ascendente).
 ### 6.3 Servicio SOAP (interoperabilidad)
 
 - **WSDL:** `public/studyhub.wsdl`. `GET /api/soap` devuelve el WSDL; `POST /api/soap` procesa
-  un envelope SOAP 1.1 con `node-soap`.
-- **Operaciones (solo lectura):** `GetCategories`, `GetTaskStats`, `GetStudyStats` — todas
-  reciben `userId` y delegan en los modelos (`CategoryModel`, `SessionModel`) o en queries
-  directas. Implementación en `lib/services/StudyHubSoapService.ts`
-  (`buildSoapServiceObject` arma la forma `service → port → operation` que espera node-soap).
+  un envelope SOAP 1.1 con `node-soap`. El WSDL se cachea en memoria por proceso (antes se
+  releía de disco y se reparseaba en cada petición).
+- **Autenticación:** `POST /api/soap` **requiere sesión** y devuelve un `soap:Fault` 401 si no
+  la hay. El `userId` que declara el WSDL se acepta por compatibilidad pero **no se usa para
+  consultar**: la identidad sale siempre de `auth.getUser()`. Si el del envelope no coincide
+  con la sesión, la operación falla con un Fault 403. Antes cada operación consultaba con el
+  `userId` que le enviaran, sin comprobar sesión.
+- **Operaciones (solo lectura):** `GetCategories`, `GetTaskStats`, `GetStudyStats`, que
+  delegan en los modelos (`CategoryModel`, `SessionModel`) o en queries directas.
+  Implementación en `lib/services/StudyHubSoapService.ts` (`buildSoapServiceObject` arma la
+  forma `service → port → operation` que espera node-soap y recibe el usuario de la sesión).
 
 ---
 
@@ -392,11 +496,17 @@ ascendente).
 
 - **TypeScript estricto**, evitar `any`.
 - **Server Components por defecto**; `'use client'` solo cuando hay interactividad.
-- **Validación con Zod** en formularios y route handlers.
-- Acceso a datos **siempre a través de la capa de modelos** (`lib/models/`); no dispersar
-  queries de Supabase por componentes o handlers.
-- Handlers de API: `getAuthContext()` → validar (Zod) → modelo → `ok()`/`err()`.
+- **Validación con Zod** en formularios, route handlers y Server Actions, **con el esquema
+  compartido de `lib/api/schemas.ts`**. Un esquema duplicado en un componente es un bug latente:
+  cliente y servidor acaban aceptando cosas distintas.
+- Las **escrituras con reglas de negocio** pasan por la capa de modelos (`lib/models/`), vía
+  Server Action o route handler. Los flips de estado sin reglas pueden ir directos a Supabase.
+  La tabla de §5.5 es la referencia; ante la duda, Server Action.
+- Handlers de API: `getAuthContext()` → `parseBody()` → modelo → `ok()` / `errorResponse()`.
+  **Nunca devolver al cliente el mensaje crudo de un error de Postgres.**
 - **Optimistic updates** en interacciones críticas (drag & drop, toggle de completado).
+- **Métricas de estudio solo desde `lib/stats.ts`** (§5.6): sobre `actual_duration_seconds` y
+  agrupando días con `localDayKey()`. Toda métrica nueva va acompañada de su test.
 - **RLS activado** en todas las tablas; nunca confiar solo en el filtrado de la aplicación.
 - **Sin secretos en el código**: todo por variables de entorno.
 - UI theme-aware: usar variables CSS de superficie para que el modo oscuro funcione sin

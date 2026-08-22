@@ -21,18 +21,17 @@ import {
   ListChecks,
   Code2,
   Quote,
-  Link2,
   Image as ImageIcon,
   Heading1,
   Heading2,
   Heading3,
   Trash2,
   Tag,
-  Folder,
   X,
   Check,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 import { toast } from 'sonner';
 import type { Note, Folder as FolderType } from '@/lib/types';
 
@@ -46,12 +45,12 @@ interface Props {
 export function NoteEditor({ note, folders }: Props) {
   const supabase = createClient();
   const router = useRouter();
+  const confirm = useConfirm();
   const [title, setTitle] = useState(note.title);
   const [folderId, setFolderId] = useState<string | null>(note.folder_id);
   const [tags, setTags] = useState<string[]>(note.tags ?? []);
   const [tagInput, setTagInput] = useState('');
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const editor = useEditor({
@@ -72,38 +71,67 @@ export function NoteEditor({ note, folders }: Props) {
     },
   });
 
-  const scheduleAutosave = useCallback(() => {
-    if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    saveTimeout.current = setTimeout(() => {
-      doSave();
-    }, 1000);
-  }, []);
+  // El autoguardado se dispara desde un setTimeout, así que lee los campos a
+  // través de un ref en vez de capturarlos en un closure. Antes
+  // `scheduleAutosave` era un useCallback con dependencias vacías: congelaba
+  // el `doSave` del primer render, que cerraba sobre el título, la carpeta y
+  // los tags iniciales. El contenido se guardaba bien (`editor` es estable),
+  // pero al cambiar el título el guardado automático lo revertía al valor
+  // original un segundo después.
+  const fieldsRef = useRef({ title, folderId, tags });
+  useEffect(() => {
+    fieldsRef.current = { title, folderId, tags };
+  }, [title, folderId, tags]);
 
-  async function doSave() {
-    if (!editor) return;
+  // `onUpdate` se define en la primera render, cuando useEditor todavía puede
+  // devolver null, así que el editor también se lee por ref.
+  const editorRef = useRef(editor);
+  useEffect(() => {
+    editorRef.current = editor;
+  }, [editor]);
+
+  const doSave = useCallback(async () => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor) return;
     setSaveStatus('saving');
-    const content = editor.getJSON();
-    const content_text = editor.getText();
+    const content = currentEditor.getJSON();
+    const content_text = currentEditor.getText();
+    const { title: t, folderId: f, tags: g } = fieldsRef.current;
 
     const { error } = await supabase
       .from('notes')
-      .update({ title, content, content_text, folder_id: folderId, tags })
+      .update({ title: t, content, content_text, folder_id: f, tags: g })
       .eq('id', note.id);
 
-    setSaveStatus(error ? 'unsaved' : 'saved');
-  }
+    if (error) {
+      setSaveStatus('unsaved');
+      toast.error('No se pudo guardar la nota. Revisa tu conexión.');
+      return;
+    }
+    setSaveStatus('saved');
+  }, [note.id, supabase]);
+
+  const scheduleAutosave = useCallback(() => {
+    if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    saveTimeout.current = setTimeout(doSave, 1000);
+  }, [doSave]);
 
   // Save on title/folder/tags change
   useEffect(() => {
     if (saveStatus === 'saved') return;
     scheduleAutosave();
-  }, [title, folderId, tags]);
+  }, [title, folderId, tags, saveStatus, scheduleAutosave]);
+
+  // No dejar un guardado pendiente al desmontar (p. ej. al volver a /notes).
+  useEffect(() => {
+    return () => {
+      if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    };
+  }, []);
 
   async function handleImageUpload(file: File) {
     const path = `${(await supabase.auth.getUser()).data.user?.id}/${Date.now()}-${file.name}`;
-    const { data, error } = await supabase.storage
-      .from('notes-images')
-      .upload(path, file);
+    const { error } = await supabase.storage.from('notes-images').upload(path, file);
     if (error) { toast.error('Error al subir imagen'); return null; }
     const { data: { publicUrl } } = supabase.storage.from('notes-images').getPublicUrl(path);
     return publicUrl;
@@ -123,7 +151,19 @@ export function NoteEditor({ note, folders }: Props) {
   }
 
   async function handleDelete() {
-    await supabase.from('notes').delete().eq('id', note.id);
+    // Mismo diálogo que en el resto de la aplicación; antes esta pantalla
+    // tenía su propia confirmación en línea de dos pasos.
+    const ok = await confirm({
+      title: '¿Eliminar la nota?',
+      message: `«${title || 'Sin título'}» se eliminará definitivamente.`,
+    });
+    if (!ok) return;
+
+    const { error } = await supabase.from('notes').delete().eq('id', note.id);
+    if (error) {
+      toast.error('No se pudo eliminar la nota');
+      return;
+    }
     toast.success('Nota eliminada');
     router.push('/notes');
   }
@@ -169,34 +209,30 @@ export function NoteEditor({ note, folders }: Props) {
           ))}
         </select>
 
-        {/* Save status */}
-        <span className={`ml-auto text-xs flex items-center gap-1.5 ${
-          saveStatus === 'saved'
-            ? 'text-[var(--color-primary)]'
-            : saveStatus === 'saving'
-            ? 'text-[var(--color-gray-mid)]'
-            : 'text-yellow-500'
-        }`}>
+        {/* Estado de guardado. «Guardado» ya no se pinta con el verde de
+            marca: ese color es el de las acciones, y aquí no hay nada que
+            pulsar. Un estado en reposo se comunica bajando el tono. */}
+        <span
+          className={`ml-auto text-xs flex items-center gap-1.5 ${
+            saveStatus === 'unsaved'
+              ? 'text-amber-600 dark:text-amber-400'
+              : 'text-[var(--color-gray-mid)]'
+          }`}
+          role="status"
+          aria-live="polite"
+        >
           {saveStatus === 'saved' && <><Check size={12} /> Guardado</>}
           {saveStatus === 'saving' && 'Guardando...'}
           {saveStatus === 'unsaved' && 'Sin guardar'}
         </span>
 
-        {!showDeleteConfirm ? (
-          <button
-            onClick={() => setShowDeleteConfirm(true)}
-            className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/15 text-[var(--color-gray-mid)] hover:text-red-500 transition-colors"
-            aria-label="Eliminar nota"
-          >
-            <Trash2 size={16} />
-          </button>
-        ) : (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-red-600">¿Eliminar?</span>
-            <button onClick={handleDelete} className="text-xs px-2 py-1 bg-red-600 text-white rounded">Sí</button>
-            <button onClick={() => setShowDeleteConfirm(false)} className="text-xs px-2 py-1 border rounded">No</button>
-          </div>
-        )}
+        <button
+          onClick={handleDelete}
+          className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/15 text-[var(--color-gray-mid)] hover:text-red-500 transition-colors"
+          aria-label="Eliminar nota"
+        >
+          <Trash2 size={16} />
+        </button>
       </div>
 
       {/* Tags bar */}

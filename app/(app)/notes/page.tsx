@@ -1,5 +1,6 @@
 import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import { NotesClient } from '@/components/notes/NotesClient';
+import { OfflineNotesCache } from '@/components/notes/OfflineNotesCache';
 
 export default async function NotesPage() {
   const supabase = await createClient();
@@ -19,9 +20,14 @@ export default async function NotesPage() {
   ]);
 
   return (
-    <NotesClient
-      initialFolders={folders ?? []}
-      initialNotes={notes ?? []}
-    />
+    <>
+      {/* Copia local para poder leer los apuntes sin conexión (C10). */}
+      <OfflineNotesCache userId={user!.id} notes={notes ?? []} />
+      <NotesClient
+        initialFolders={folders ?? []}
+        initialNotes={notes ?? []}
+        userId={user!.id}
+      />
+    </>
   );
 }

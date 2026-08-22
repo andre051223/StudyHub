@@ -1,6 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import type { Note } from '@/lib/types';
 import { BaseModel } from './BaseModel';
+import type { SearchHit } from './SearchModel';
 
 export interface CreateNoteInput {
   title?: string;
@@ -44,16 +45,32 @@ export class NoteModel extends BaseModel {
     return data ?? null;
   }
 
-  async search(query: string, userId: string): Promise<Partial<Note>[]> {
-    const { data, error } = await this.supabase
-      .from('notes')
-      .select('id, title, content_text, tags, updated_at, folder_id')
-      .eq('user_id', userId)
-      .or(`title.ilike.%${query}%,content_text.ilike.%${query}%`)
-      .order('updated_at', { ascending: false })
-      .limit(20);
+  /**
+   * Búsqueda de texto sobre las notas del usuario.
+   *
+   * La versión anterior filtraba con
+   * `.or('title.ilike.%q%,content_text.ilike.%q%')`, lo que tenía tres
+   * problemas a la vez:
+   *
+   * 1. Un `ILIKE '%…%'` no puede usar el índice GIN `notes_search_idx` que la
+   *    migración 001 creó justo para esto, así que hacía barrido completo.
+   * 2. Interpolaba el término dentro de la sintaxis de filtros de PostgREST
+   *    sin escaparlo: una coma o un paréntesis en la búsqueda rompían el
+   *    filtro o cambiaban su significado.
+   * 3. No entiende de idioma: buscar «exámenes» no encontraba «examen».
+   *
+   * Ahora delega en la función `search_everything` (migración 007), que hace
+   * full-text en español con prefijo y recibe el término como parámetro, no
+   * como parte de la consulta. Se queda solo con las notas; la paleta de
+   * comandos usa la misma función sin ese filtro (ver SearchModel).
+   */
+  async search(query: string, limit = 20): Promise<SearchHit[]> {
+    const { data, error } = await this.supabase.rpc('search_everything', {
+      q: query,
+      max_results: limit,
+    });
     if (error) this.handleError(error);
-    return data ?? [];
+    return ((data ?? []) as SearchHit[]).filter((hit) => hit.kind === 'note');
   }
 
   async create(input: CreateNoteInput, userId: string): Promise<Note> {

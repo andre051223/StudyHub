@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Clock, CheckCircle2, XCircle } from 'lucide-react';
+import { Clock, CheckCircle2, XCircle, ListChecks } from 'lucide-react';
 import type { StudySession } from '@/lib/types';
+import { localDayKey } from '@/lib/stats';
 import { formatDateTime, formatTime } from '@/lib/utils';
 
 interface Props {
@@ -15,8 +16,9 @@ export function SessionHistory({ sessions }: Props) {
 
   const filtered = sessions.filter((s) => {
     if (dateFilter) {
-      const d = new Date(s.started_at).toISOString().slice(0, 10);
-      if (!d.startsWith(dateFilter)) return false;
+      // Por día local: con toISOString() una sesión nocturna se filtraba como
+      // del mes siguiente en los últimos días del mes.
+      if (!localDayKey(s.started_at).startsWith(dateFilter)) return false;
     }
     if (categoryFilter && s.category?.name !== categoryFilter) return false;
     return true;
@@ -73,13 +75,23 @@ export function SessionHistory({ sessions }: Props) {
             )}
 
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-[var(--color-text)]">
-                Inicio: {formatDateTime(s.started_at)}
-              </p>
+              {/* Si la sesión se estudió sobre una tarea, ese es el titular:
+                  "parcial de Cálculo" dice más que una marca de tiempo. */}
+              {s.task ? (
+                <p className="flex items-center gap-1.5 text-sm font-medium text-[var(--color-text)] truncate">
+                  <ListChecks size={13} className="text-[var(--color-gray-mid)] flex-shrink-0" />
+                  {s.task.title}
+                </p>
+              ) : (
+                <p className="text-sm font-medium text-[var(--color-text)]">
+                  Inicio: {formatDateTime(s.started_at)}
+                </p>
+              )}
               <p className="text-xs text-[var(--color-text-soft)]">
+                {s.task && `${formatDateTime(s.started_at)} · `}
                 Fin: {s.completed_at ? formatTime(s.completed_at) : 'En progreso'} ·{' '}
-                {s.mode === 'stopwatch' ? 'Cronómetro' : s.mode === 'pomodoro' ? 'Pomodoro' : 'Temporizador'} ·{' '}
-                {Math.round(s.actual_duration_seconds / 60)} min reales
+                {s.mode === 'stopwatch' ? 'Cronómetro' : s.mode === 'pomodoro' ? 'Pomodoro' : 'Temporizador'}
+                {s.duration_minutes !== null && ` · ${s.duration_minutes} min planeados`}
               </p>
             </div>
 
@@ -96,7 +108,7 @@ export function SessionHistory({ sessions }: Props) {
                 </span>
               )}
               <span className="text-sm font-semibold text-[var(--color-text)]">
-                {s.duration_minutes} min
+                {Math.round(s.actual_duration_seconds / 60)} min
               </span>
             </div>
           </div>

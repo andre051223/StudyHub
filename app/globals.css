@@ -161,3 +161,80 @@ select option {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-gray-mid);
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Escala tipográfica
+   ─────────────────────────────────────────────────────────────
+   Antes casi todo el producto vivía entre `text-sm` y `text-2xl`: los títulos
+   de página y los de sección se distinguían apenas, y el cuerpo, las etiquetas
+   y los metadatos compartían tamaño. Estos cuatro niveles son los únicos que
+   deberían aparecer en una pantalla; el resto de tamaños se reserva para
+   piezas concretas (el cronómetro, los contadores grandes).
+
+   Se nombran `heading-*` y no `text-*` a propósito: `cn()` usa tailwind-merge,
+   que trata cualquier clase `text-<algo>` como un tamaño de fuente y podría
+   descartar una de las dos al fusionarlas. */
+@layer components {
+  /* 1 · Título de pantalla. Uno por página. */
+  .heading-page {
+    font-size: 1.75rem;
+    line-height: 1.15;
+    font-weight: 700;
+    letter-spacing: -0.021em;
+  }
+
+  /* 2 · Título de sección o de modal. */
+  .heading-section {
+    font-size: 1.0625rem;
+    line-height: 1.35;
+    font-weight: 600;
+    letter-spacing: -0.008em;
+  }
+
+  /* 3 · Etiqueta de grupo: versalitas para separar sin pesar. */
+  .text-eyebrow {
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--color-gray-mid);
+  }
+
+  /* 4 · Metadato: fechas, contadores, estados. Nunca compite con el cuerpo. */
+  .text-meta {
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--color-text-soft);
+  }
+}
+
+/* Los modales usan el <dialog> nativo (ver components/shared/Modal.tsx). El
+   navegador le da un `max-width` y un borde propios que hay que neutralizar
+   para que las clases del componente manden.
+
+   Va en `@layer base` y no suelto: en la cascada por capas, el CSS sin capa
+   gana a *todas* las capas, así que una regla suelta se impondría a las
+   utilidades `max-w-*` de Tailwind. */
+@layer base {
+  dialog {
+    max-width: none;
+    max-height: none;
+    border: 0;
+  }
+
+  dialog::backdrop {
+    animation: dialog-backdrop-in 0.15s ease-out;
+  }
+
+  /* El scroll del documento se congela mientras hay un modal abierto: sin esto
+     la página de detrás sigue desplazándose con la rueda. */
+  body:has(dialog[open]) {
+    overflow: hidden;
+  }
+}
+
+@keyframes dialog-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}

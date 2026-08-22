@@ -1,30 +1,31 @@
 import { NextRequest } from 'next/server';
 import { FolderModel } from '@/lib/models';
-import { getAuthContext, ok, err } from '@/lib/api/helpers';
+import { createFolderSchema } from '@/lib/api/schemas';
+import { getAuthContext, parseBody, isResponse, ok, errorResponse } from '@/lib/api/helpers';
 
 export async function GET() {
   const ctx = await getAuthContext();
-  if ('status' in ctx) return ctx;
+  if (isResponse(ctx)) return ctx;
 
   try {
     const model = new FolderModel(ctx.supabase);
-    const folders = await model.findAllByUser(ctx.userId);
-    return ok(folders);
+    return ok(await model.findAllByUser(ctx.userId));
   } catch (e) {
-    return err((e as Error).message);
+    return errorResponse(e);
   }
 }
 
 export async function POST(req: NextRequest) {
   const ctx = await getAuthContext();
-  if ('status' in ctx) return ctx;
+  if (isResponse(ctx)) return ctx;
+
+  const body = await parseBody(req, createFolderSchema);
+  if (isResponse(body)) return body;
 
   try {
-    const body = await req.json();
     const model = new FolderModel(ctx.supabase);
-    const folder = await model.create(body, ctx.userId);
-    return ok(folder, 201);
+    return ok(await model.create(body.data, ctx.userId), 201);
   } catch (e) {
-    return err((e as Error).message);
+    return errorResponse(e);
   }
 }

@@ -7,5 +7,7 @@ export { FolderModel } from './FolderModel';
 export type { CreateFolderInput, UpdateFolderInput } from './FolderModel';
 export { NoteModel } from './NoteModel';
 export type { CreateNoteInput, UpdateNoteInput } from './NoteModel';
+export { SearchModel } from './SearchModel';
+export type { SearchHit } from './SearchModel';
 export { SessionModel } from './SessionModel';
 export type { CreateSessionInput, SessionStats } from './SessionModel';

@@ -2,30 +2,43 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { CategoryModel } from '@/lib/models/CategoryModel';
 import { SessionModel } from '@/lib/models/SessionModel';
 
-interface GetCategoriesArgs {
-  userId: string;
-}
-
-interface GetTaskStatsArgs {
-  userId: string;
-}
-
-interface GetStudyStatsArgs {
-  userId: string;
+interface OperationArgs {
+  /**
+   * El WSDL declara `userId` en las tres peticiones, así que los clientes
+   * existentes lo siguen enviando. **No se usa para consultar**: el usuario se
+   * deriva siempre de la sesión del request. Si viene y no coincide con la
+   * sesión, la operación falla en lugar de devolver datos ajenos.
+   */
+  userId?: string;
 }
 
 /**
- * Implementación de las operaciones SOAP de StudyHub.
- * Cada método recibe los argumentos del envelope SOAP y devuelve
- * la estructura que node-soap serializa de vuelta como respuesta XML.
+ * Operaciones SOAP de StudyHub (solo lectura).
+ *
+ * Antes cada método consultaba con el `userId` que venía en el envelope, sin
+ * comprobar sesión: la identidad la elegía quien llamaba. RLS lo contenía en
+ * la práctica —el cliente usa la anon key con las cookies del request—, pero
+ * el diseño era incorrecto y habría bastado cambiar ese cliente por uno con
+ * service role para convertirlo en una fuga completa.
  */
 export class StudyHubSoapService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(
+    private readonly supabase: SupabaseClient,
+    /** Usuario autenticado del request. Única fuente de identidad. */
+    private readonly sessionUserId: string
+  ) {}
 
-  async GetCategories({ userId }: GetCategoriesArgs) {
-    if (!userId) throw new Error('userId es obligatorio');
-    const model = new CategoryModel(this.supabase);
-    const list = await model.findAllByUser(userId);
+  /** Rechaza un envelope que pida datos de otro usuario. */
+  private resolveUserId(args: OperationArgs): string {
+    if (args.userId && args.userId !== this.sessionUserId) {
+      throw new Error('No autorizado: el userId no corresponde a la sesión.');
+    }
+    return this.sessionUserId;
+  }
+
+  async GetCategories(args: OperationArgs) {
+    const userId = this.resolveUserId(args);
+    const list = await new CategoryModel(this.supabase).findAllByUser(userId);
     return {
       categories: {
         category: list.map((c) => ({
@@ -38,8 +51,8 @@ export class StudyHubSoapService {
     };
   }
 
-  async GetTaskStats({ userId }: GetTaskStatsArgs) {
-    if (!userId) throw new Error('userId es obligatorio');
+  async GetTaskStats(args: OperationArgs) {
+    const userId = this.resolveUserId(args);
 
     const { data } = await this.supabase
       .from('tasks')
@@ -61,10 +74,10 @@ export class StudyHubSoapService {
     };
   }
 
-  async GetStudyStats({ userId }: GetStudyStatsArgs) {
-    if (!userId) throw new Error('userId es obligatorio');
-    const model = new SessionModel(this.supabase);
-    const stats = await model.getStats(userId);
+  async GetStudyStats(args: OperationArgs) {
+    const userId = this.resolveUserId(args);
+    // Mismas métricas que la UI: getStats() delega en lib/stats.ts.
+    const stats = await new SessionModel(this.supabase).getStats(userId);
     return {
       stats: {
         totalMinutesThisWeek: stats.totalMinutesThisWeek,
@@ -77,14 +90,14 @@ export class StudyHubSoapService {
 }
 
 /** Objeto de servicio con la forma que espera node-soap (service → port → operation) */
-export function buildSoapServiceObject(supabase: SupabaseClient) {
-  const impl = new StudyHubSoapService(supabase);
+export function buildSoapServiceObject(supabase: SupabaseClient, sessionUserId: string) {
+  const impl = new StudyHubSoapService(supabase, sessionUserId);
   return {
     StudyHubService: {
       StudyHubPort: {
-        GetCategories: (args: GetCategoriesArgs) => impl.GetCategories(args),
-        GetTaskStats: (args: GetTaskStatsArgs) => impl.GetTaskStats(args),
-        GetStudyStats: (args: GetStudyStatsArgs) => impl.GetStudyStats(args),
+        GetCategories: (args: OperationArgs) => impl.GetCategories(args),
+        GetTaskStats: (args: OperationArgs) => impl.GetTaskStats(args),
+        GetStudyStats: (args: OperationArgs) => impl.GetStudyStats(args),
       },
     },
   };

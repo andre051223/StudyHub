@@ -1,17 +1,16 @@
 'use client';
 
-import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { Loader2, Check } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { updateProfileAction } from '@/app/(app)/profile/actions';
+import { updateProfileSchema } from '@/lib/api/schemas';
 import type { Profile } from '@/lib/types';
+import type { z } from 'zod';
 
-const schema = z.object({
-  full_name: z.string().min(2, 'Mínimo 2 caracteres'),
-});
+// Mismo esquema que valida el servidor.
+const schema = updateProfileSchema;
 
 type FormData = z.infer<typeof schema>;
 
@@ -21,10 +20,10 @@ interface Props {
 }
 
 export function ProfileClient({ profile, email }: Props) {
-  const supabase = createClient();
   const {
     register,
     handleSubmit,
+    reset,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -32,11 +31,11 @@ export function ProfileClient({ profile, email }: Props) {
   });
 
   async function onSubmit(data: FormData) {
-    const { error } = await supabase
-      .from('profiles')
-      .update({ full_name: data.full_name })
-      .eq('id', profile?.id ?? '');
-    if (error) { toast.error('Error al guardar'); return; }
+    const result = await updateProfileAction(data);
+    if (!result.ok) { toast.error(result.error); return; }
+    // Reinicia el estado del formulario para que "Guardar" vuelva a quedar
+    // deshabilitado hasta el siguiente cambio.
+    reset({ full_name: result.data.full_name });
     toast.success('Perfil actualizado');
   }
 

@@ -5,17 +5,36 @@ import ReactDOM from 'react-dom/client';
 import { Play, Pause, Square, PictureInPicture2 } from 'lucide-react';
 import { MiniTimer } from './MiniTimer';
 import { toast } from 'sonner';
-import { createClient } from '@/lib/supabase/client';
-import type { Category, StudySession, StudyMode, TimerState } from '@/lib/types';
+import { createSessionAction } from '@/app/(app)/timer/actions';
+import type { Category, StudySession, StudyMode, TimerState, TaskQuadrant } from '@/lib/types';
+import type { StatsSession } from '@/lib/stats';
+import { MIN_TIMER_MINUTES, MAX_TIMER_MINUTES } from '@/lib/models/SessionModel';
 import { formatDuration, getCircumference } from '@/lib/utils';
 import { SessionHistory } from './SessionHistory';
 import { StudyStats } from './StudyStats';
 import { StudyGoals } from './StudyGoals';
 
 const STORAGE_KEY = 'studyhub_timer_state';
-// Rango del selector de duración del temporizador (en minutos).
-const MIN_DURATION = 10;
-const MAX_DURATION = 120;
+// Rango del selector de duración del temporizador (en minutos). Vive en el
+// modelo para que la UI y la validación de servidor no puedan divergir.
+const MIN_DURATION = MIN_TIMER_MINUTES;
+const MAX_DURATION = MAX_TIMER_MINUTES;
+
+/** Lo mínimo que necesita el selector de tareas del temporizador. */
+export interface OpenTask {
+  id: string;
+  title: string;
+  quadrant: TaskQuadrant;
+  category_id: string | null;
+}
+
+/** Orden y etiquetas de los grupos del selector, de más a menos urgente. */
+const TASK_GROUPS: { quadrant: TaskQuadrant; label: string }[] = [
+  { quadrant: 'urgent_important', label: 'Hacer ahora' },
+  { quadrant: 'not_urgent_important', label: 'Planificar' },
+  { quadrant: 'urgent_not_important', label: 'Delegar' },
+  { quadrant: 'not_urgent_not_important', label: 'Eliminar' },
+];
 
 const defaultState: TimerState = {
   isRunning: false,
@@ -23,6 +42,7 @@ const defaultState: TimerState = {
   mode: 'simple',
   durationMinutes: 25,
   categoryId: null,
+  taskId: null,
   startedAt: null,
   pausedAt: null,
   totalPausedMs: 0,
@@ -31,34 +51,46 @@ const defaultState: TimerState = {
 
 interface Props {
   categories: Category[];
+  /** Historial completo, acotado a las 50 más recientes. */
   initialSessions: (StudySession & { category?: { name: string; color: string } | null })[];
+  /** Sesiones completadas del último año, con las columnas mínimas para las estadísticas. */
+  initialStatsSessions: StatsSession[];
+  /** Tareas pendientes, para poder estudiar sobre una en concreto. */
+  openTasks: OpenTask[];
   dailyGoal: number;
   weeklyGoal: number;
 }
 
-export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal }: Props) {
-  const supabase = createClient();
+export function TimerClient({
+  categories,
+  initialSessions,
+  initialStatsSessions,
+  openTasks,
+  dailyGoal,
+  weeklyGoal,
+}: Props) {
   const [state, setState] = useState<TimerState>(defaultState);
   const [secondsLeft, setSecondsLeft] = useState(defaultState.durationMinutes * 60);
   const [activeTab, setActiveTab] = useState<'history' | 'stats' | 'goals'>('history');
   const [sessions, setSessions] = useState(initialSessions);
+  // Se mantiene aparte del historial para que las estadísticas sigan cubriendo
+  // el año completo y a la vez se actualicen al guardar una sesión nueva.
+  const [statsSessions, setStatsSessions] = useState(initialStatsSessions);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const savingRef = useRef(false);
   const stateRef = useRef(state);
   const pipRootRef = useRef<ReturnType<typeof ReactDOM.createRoot> | null>(null);
   const [pipWindow, setPipWindow] = useState<Window | null>(null);
-  const userIdRef = useRef<string | null>(null);
 
   // Keep stateRef in sync so async callbacks always see latest state
   useEffect(() => { stateRef.current = state; });
 
-  // Cache the authenticated user id so saveSession can include it
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      userIdRef.current = data.user?.id ?? null;
-    });
-  }, []);
+  // Misma técnica para la lista de tareas: el effect de hidratación necesita
+  // consultarla, pero no debe volver a ejecutarse si cambia (rehidratar desde
+  // localStorage a mitad de una sesión pisaría el estado en curso).
+  const openTasksRef = useRef(openTasks);
+  useEffect(() => { openTasksRef.current = openTasks; });
 
   // Load persisted state on mount (client only). Se hace en un effect, y no en
   // un inicializador lazy de useState, para que el render del servidor y el
@@ -71,6 +103,13 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
         const parsed = JSON.parse(saved) as TimerState;
         // Estados guardados antes de retirar el modo Pomodoro.
         if ((parsed.mode as string) === 'pomodoro') parsed.mode = 'simple';
+        // Estados guardados antes de que existiera la tarea asociada, y
+        // tareas que ya no están pendientes: la referencia se descarta en vez
+        // de guardar una sesión apuntando a algo que ya no existe.
+        parsed.taskId =
+          parsed.taskId && openTasksRef.current.some((t) => t.id === parsed.taskId)
+            ? parsed.taskId
+            : null;
         // eslint-disable-next-line react-hooks/set-state-in-effect -- hidratación desde localStorage
         setState(parsed);
       }
@@ -99,6 +138,18 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
     [computeElapsedSeconds]
   );
 
+  // `handleComplete` se recrea en cada render, pero el intervalo no debe
+  // reiniciarse por eso: se invoca a través de un ref para que las
+  // dependencias del effect sean solo los campos del temporizador que sí
+  // justifican reprogramarlo.
+  const handleCompleteRef = useRef(handleComplete);
+  useEffect(() => { handleCompleteRef.current = handleComplete; });
+
+  // Etiqueta del modo. Declarada aquí arriba porque el effect de la ventana
+  // flotante la lista entre sus dependencias, y un `const` posterior estaría
+  // en zona muerta temporal al evaluarse el array.
+  const phaseLabel = state.mode === 'stopwatch' ? 'Cronómetro' : 'Temporizador';
+
   // Tick. `secondsLeft` holds the value shown on screen: remaining seconds for
   // the countdown, elapsed seconds for the stopwatch.
   useEffect(() => {
@@ -112,15 +163,24 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
         // The stopwatch counts up with no target, so it never auto-completes.
         if (stateRef.current.mode !== 'stopwatch' && value <= 0 && !savingRef.current) {
           savingRef.current = true;
-          handleComplete().finally(() => { savingRef.current = false; });
+          handleCompleteRef.current().finally(() => { savingRef.current = false; });
         }
       }, 500);
     } else {
       if (tickRef.current) clearInterval(tickRef.current);
-      setSecondsLeft(tick(state));
+      // stateRef ya está sincronizado: su effect se declara antes que este.
+      setSecondsLeft(tick(stateRef.current));
     }
     return () => { if (tickRef.current) clearInterval(tickRef.current); };
-  }, [state.isRunning, state.isPaused, state.startedAt, state.durationMinutes, state.mode]);
+  }, [
+    state.isRunning,
+    state.isPaused,
+    state.startedAt,
+    state.durationMinutes,
+    state.mode,
+    computeElapsedSeconds,
+    computeSecondsLeft,
+  ]);
 
   async function openPiP() {
     if (!('documentPictureInPicture' in window)) {
@@ -158,6 +218,20 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
     }
   }
 
+  // Los controles del MiniTimer se recrean en cada render. Envolverlos en
+  // callbacks estables evita que la ventana flotante se vuelva a renderizar
+  // solo porque cambió la identidad de una función.
+  const handlersRef = useRef({ handleStart, handlePause, handleResume, handleStop });
+  useEffect(() => {
+    handlersRef.current = { handleStart, handlePause, handleResume, handleStop };
+  });
+  const pipHandlers = useRef({
+    onStart: () => handlersRef.current.handleStart(),
+    onPause: () => handlersRef.current.handlePause(),
+    onResume: () => handlersRef.current.handleResume(),
+    onStop: () => handlersRef.current.handleStop(),
+  }).current;
+
   // Sync mini timer into PiP window
   useEffect(() => {
     if (!pipWindow) return;
@@ -170,13 +244,13 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
         phaseLabel={phaseLabel}
         isRunning={state.isRunning}
         isPaused={state.isPaused}
-        onPause={handlePause}
-        onResume={handleResume}
-        onStop={handleStop}
-        onStart={handleStart}
+        onPause={pipHandlers.onPause}
+        onResume={pipHandlers.onResume}
+        onStop={pipHandlers.onStop}
+        onStart={pipHandlers.onStart}
       />
     );
-  }, [pipWindow, secondsLeft, state.isRunning, state.isPaused, state.mode]);
+  }, [pipWindow, secondsLeft, state.isRunning, state.isPaused, phaseLabel, pipHandlers]);
 
   // Clean up PiP root when window closes
   useEffect(() => {
@@ -224,46 +298,54 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
     playBell();
     sendBrowserNotification('¡Sesión completada! Tiempo de descansar.');
     await saveSession(true);
-    setState({ ...defaultState, mode: s.mode, durationMinutes: s.durationMinutes, categoryId: s.categoryId });
+    setState({
+      ...defaultState,
+      mode: s.mode,
+      durationMinutes: s.durationMinutes,
+      categoryId: s.categoryId,
+      taskId: s.taskId,
+    });
     toast.success('¡Sesión completada!');
   }
 
   async function saveSession(completed: boolean) {
     const s = stateRef.current;
-    if (!userIdRef.current) {
-      const { data: userData } = await supabase.auth.getUser();
-      userIdRef.current = userData.user?.id ?? null;
-    }
-    if (!userIdRef.current) {
-      toast.error('Error al guardar la sesión: usuario no autenticado');
-      return;
-    }
     // Tiempo realmente estudiado. En el cronómetro no hay duración planeada,
     // así que se usa el tiempo transcurrido directamente.
-    const actual =
+    const actual = Math.max(
+      0,
       s.mode === 'stopwatch'
         ? computeElapsedSeconds(s)
-        : s.durationMinutes * 60 - computeSecondsLeft(s);
-    const { data, error } = await supabase
-      .from('study_sessions')
-      .insert({
-        user_id: userIdRef.current,
-        category_id: s.categoryId,
-        duration_minutes: s.mode === 'stopwatch' ? Math.round(actual / 60) : s.durationMinutes,
-        actual_duration_seconds: actual,
-        mode: s.mode,
-        pomodoro_cycles_completed: 0,
-        started_at: new Date(s.startedAt!).toISOString(),
-        completed_at: completed ? new Date().toISOString() : null,
-      })
-      .select('*, category:categories(name, color)')
-      .single();
-    if (error) {
-      toast.error('Error al guardar la sesión');
+        : s.durationMinutes * 60 - computeSecondsLeft(s)
+    );
+    // Por Server Action: SessionModel valida el rango según el modo (10–120
+    // solo para el temporizador, sin techo para el cronómetro) y que el tiempo
+    // transcurrido no sea negativo. Insertando directo nada de eso corría.
+    const result = await createSessionAction({
+      category_id: s.categoryId,
+      task_id: s.taskId,
+      // El cronómetro no tiene duración planeada: se guarda null. Antes se
+      // escribía Math.round(actual / 60), que rompía el CHECK de la base
+      // tanto por arriba (más de 2 h) como por abajo (menos de 30 s → 0), y
+      // la sesión se perdía con un toast de error.
+      duration_minutes: s.mode === 'stopwatch' ? null : s.durationMinutes,
+      actual_duration_seconds: actual,
+      mode: s.mode,
+      pomodoro_cycles_completed: 0,
+      started_at: new Date(s.startedAt!).toISOString(),
+      completed_at: completed ? new Date().toISOString() : null,
+    });
+
+    if (!result.ok) {
+      toast.error(result.error);
       return;
     }
-    if (data) {
-      setSessions((prev) => [data as typeof sessions[0], ...prev]);
+
+    const saved = result.data as typeof sessions[0];
+    setSessions((prev) => [saved, ...prev]);
+    // Solo las completadas alimentan las estadísticas.
+    if (saved.completed_at) {
+      setStatsSessions((prev) => [saved as StatsSession, ...prev]);
     }
   }
 
@@ -294,7 +376,13 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
   async function handleStop() {
     const s = stateRef.current;
     if (s.startedAt) await saveSession(false);
-    setState({ ...defaultState, mode: s.mode, durationMinutes: s.durationMinutes, categoryId: s.categoryId });
+    setState({
+      ...defaultState,
+      mode: s.mode,
+      durationMinutes: s.durationMinutes,
+      categoryId: s.categoryId,
+      taskId: s.taskId,
+    });
     toast.info('Sesión detenida');
   }
 
@@ -321,7 +409,6 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
   const circumference = getCircumference(radius);
   const strokeDashoffset = circumference * (1 - progress);
 
-  const phaseLabel = isStopwatch ? 'Cronómetro' : 'Temporizador';
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8">
@@ -469,6 +556,54 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
               </div>
             )}
 
+            {/* Tarea sobre la que se estudia (migración 006). Elegir una
+                hereda su categoría: casi siempre es la que corresponde, y
+                evita tener que rellenar dos selectores para lo mismo. */}
+            <div>
+              <label
+                htmlFor="timer-task"
+                className="block text-sm font-medium text-[var(--color-text)] mb-2"
+              >
+                Tarea
+              </label>
+              <select
+                id="timer-task"
+                value={state.taskId ?? ''}
+                disabled={state.isRunning}
+                onChange={(e) => {
+                  const taskId = e.target.value || null;
+                  const task = openTasks.find((t) => t.id === taskId);
+                  setState((prev) => ({
+                    ...prev,
+                    taskId,
+                    categoryId: task?.category_id ?? prev.categoryId,
+                  }));
+                }}
+                className="w-full px-4 py-2.5 rounded-lg border border-[var(--color-gray-border)] text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-60 transition-all"
+              >
+                <option value="">Sin tarea concreta</option>
+                {TASK_GROUPS.map(({ quadrant, label }) => {
+                  const group = openTasks.filter((t) => t.quadrant === quadrant);
+                  if (group.length === 0) return null;
+                  return (
+                    <optgroup key={quadrant} label={label}>
+                      {group.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.title}
+                        </option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
+              </select>
+              {openTasks.length === 0 && (
+                <p className="text-meta mt-1.5">
+                  Cuando tengas tareas pendientes podrás estudiar sobre una y ver
+                  el tiempo acumulado en su tarjeta.
+                </p>
+              )}
+            </div>
+
             {/* Category */}
             <div>
               <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
@@ -516,9 +651,9 @@ export function TimerClient({ categories, initialSessions, dailyGoal, weeklyGoal
           {activeTab === 'history' ? (
             <SessionHistory sessions={sessions} />
           ) : activeTab === 'stats' ? (
-            <StudyStats sessions={sessions} />
+            <StudyStats sessions={statsSessions} />
           ) : (
-            <StudyGoals sessions={sessions} dailyGoal={dailyGoal} weeklyGoal={weeklyGoal} />
+            <StudyGoals sessions={statsSessions} dailyGoal={dailyGoal} weeklyGoal={weeklyGoal} />
           )}
         </div>
       </div>

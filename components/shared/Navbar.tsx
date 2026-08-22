@@ -6,6 +6,7 @@ import { useState } from 'react';
 import {
   BookOpen,
   CheckSquare,
+  CalendarDays,
   Timer,
   LogOut,
   User,
@@ -14,12 +15,14 @@ import {
   X,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { clearOfflineNotes } from '@/lib/offline';
 import { toast } from 'sonner';
 import { ThemeToggle } from './ThemeToggle';
 
 const NAV_LINKS = [
   { href: '/notes', label: 'Notas', icon: BookOpen },
   { href: '/tasks', label: 'Tareas', icon: CheckSquare },
+  { href: '/agenda', label: 'Agenda', icon: CalendarDays },
   { href: '/timer', label: 'Tiempo de estudio', icon: Timer },
 ];
 
@@ -37,6 +40,9 @@ export function Navbar({ userEmail, userName }: NavbarProps) {
 
   async function handleLogout() {
     await supabase.auth.signOut();
+    // Los apuntes guardados para leer sin conexión no se quedan en el equipo
+    // después de cerrar sesión (ver lib/offline.ts).
+    clearOfflineNotes();
     toast.success('Sesión cerrada');
     router.push('/login');
     router.refresh();

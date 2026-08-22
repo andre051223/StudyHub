@@ -8,12 +8,12 @@ import {
   Folder,
   FolderOpen,
   FileText,
-  Tag,
   Trash2,
   MoreVertical,
   Inbox,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 import { toast } from 'sonner';
 import type { Folder as FolderType, Note } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
@@ -21,11 +21,17 @@ import { formatDate } from '@/lib/utils';
 interface Props {
   initialFolders: (FolderType & { note_count?: { count: number }[] })[];
   initialNotes: Partial<Note>[];
+  /**
+   * `notes.user_id` y `folders.user_id` son NOT NULL. Ver la nota equivalente
+   * en TasksClient y la migración 005_data_integrity.sql.
+   */
+  userId: string;
 }
 
-export function NotesClient({ initialFolders, initialNotes }: Props) {
+export function NotesClient({ initialFolders, initialNotes, userId }: Props) {
   const supabase = createClient();
   const router = useRouter();
+  const confirm = useConfirm();
   const [folders, setFolders] = useState(initialFolders);
   const [notes, setNotes] = useState(initialNotes);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null | 'inbox'>('inbox');
@@ -59,7 +65,7 @@ export function NotesClient({ initialFolders, initialNotes }: Props) {
     if (!newFolderName.trim()) return;
     const { data, error } = await supabase
       .from('folders')
-      .insert({ name: newFolderName.trim() })
+      .insert({ name: newFolderName.trim(), user_id: userId })
       .select()
       .single();
     if (error) { toast.error('Error al crear carpeta'); return; }
@@ -69,9 +75,24 @@ export function NotesClient({ initialFolders, initialNotes }: Props) {
     toast.success('Carpeta creada');
   }
 
+  // El `confirm()` nativo del navegador se sustituyó por el diálogo compartido
+  // (ConfirmProvider): el nativo ignora el modo oscuro, no se puede estilizar
+  // y bloquea el hilo mientras está abierto.
   async function handleDeleteFolder(id: string) {
-    if (!confirm('¿Eliminar esta carpeta? Las notas quedarán en Inbox.')) return;
-    await supabase.from('folders').delete().eq('id', id);
+    const folder = folders.find((f) => f.id === id);
+    const ok = await confirm({
+      title: '¿Eliminar la carpeta?',
+      message: folder
+        ? `«${folder.name}» desaparecerá y sus notas pasarán a Inbox.`
+        : 'La carpeta desaparecerá y sus notas pasarán a Inbox.',
+    });
+    if (!ok) return;
+
+    const { error } = await supabase.from('folders').delete().eq('id', id);
+    if (error) {
+      toast.error('No se pudo eliminar la carpeta');
+      return;
+    }
     setFolders((prev) => prev.filter((f) => f.id !== id));
     if (selectedFolderId === id) setSelectedFolderId('inbox');
     toast.success('Carpeta eliminada');
@@ -82,6 +103,7 @@ export function NotesClient({ initialFolders, initialNotes }: Props) {
     const { data, error } = await supabase
       .from('notes')
       .insert({
+        user_id: userId,
         title: 'Sin título',
         folder_id: selectedFolderId === 'inbox' ? null : selectedFolderId,
         content: {},
@@ -97,8 +119,18 @@ export function NotesClient({ initialFolders, initialNotes }: Props) {
   }
 
   async function handleDeleteNote(id: string) {
-    if (!confirm('¿Eliminar esta nota?')) return;
-    await supabase.from('notes').delete().eq('id', id);
+    const note = notes.find((n) => n.id === id);
+    const ok = await confirm({
+      title: '¿Eliminar la nota?',
+      message: `«${note?.title || 'Sin título'}» se eliminará definitivamente.`,
+    });
+    if (!ok) return;
+
+    const { error } = await supabase.from('notes').delete().eq('id', id);
+    if (error) {
+      toast.error('No se pudo eliminar la nota');
+      return;
+    }
     setNotes((prev) => prev.filter((n) => n.id !== id));
     toast.success('Nota eliminada');
   }
@@ -229,7 +261,7 @@ export function NotesClient({ initialFolders, initialNotes }: Props) {
       {/* Notes list */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 bg-[var(--color-surface)] border-b border-[var(--color-gray-border)]">
-          <h2 className="font-semibold text-[var(--color-text)]">
+          <h2 className="heading-section text-[var(--color-text)]">
             {selectedFolderId === 'inbox'
               ? 'Inbox'
               : folders.find((f) => f.id === selectedFolderId)?.name ?? 'Notas'}

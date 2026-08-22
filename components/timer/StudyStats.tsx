@@ -12,15 +12,22 @@ import {
   Pie,
   Cell,
   ResponsiveContainer,
-  Legend,
 } from 'recharts';
 import { Flame, Clock, Target, TrendingUp } from 'lucide-react';
-import type { StudySession } from '@/lib/types';
-import { format, subDays, startOfDay, differenceInDays } from 'date-fns';
+import {
+  onlyCompleted,
+  dailyBuckets,
+  categoryTotals,
+  startOfLocalMonth,
+  summarize,
+  formatMinutes,
+  type StatsSession,
+} from '@/lib/stats';
+import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 interface Props {
-  sessions: (StudySession & { category?: { name: string; color: string } | null })[];
+  sessions: StatsSession[];
 }
 
 function StatCard({
@@ -47,71 +54,26 @@ function StatCard({
 }
 
 export function StudyStats({ sessions }: Props) {
-  const completedSessions = sessions.filter((s) => s.completed_at !== null);
-
+  // Todos los cálculos viven en lib/stats.ts, compartidos con el dashboard,
+  // las metas y el servicio SOAP. Antes cada pantalla tenía su propia versión
+  // y las cuatro daban números distintos para la misma semana.
   const stats = useMemo(() => {
+    const completed = onlyCompleted(sessions);
     const now = new Date();
-    const weekAgo = subDays(now, 7);
-    const monthAgo = subDays(now, 30);
+    const summary = summarize(completed, now);
 
-    // Minutes this week
-    const weekMinutes = completedSessions
-      .filter((s) => new Date(s.started_at) >= weekAgo)
-      .reduce((acc, s) => acc + s.duration_minutes, 0);
-
-    // Daily data for last 7 days
-    const dailyData = Array.from({ length: 7 }, (_, i) => {
-      const day = subDays(now, 6 - i);
-      const dayStr = startOfDay(day).toISOString().slice(0, 10);
-      const minutes = completedSessions
-        .filter((s) => s.started_at.slice(0, 10) === dayStr)
-        .reduce((acc, s) => acc + s.duration_minutes, 0);
-      return {
-        name: format(day, 'EEE', { locale: es }),
-        minutos: minutes,
-      };
-    });
-
-    // Streak
-    let streak = 0;
-    let checkDay = now;
-    while (true) {
-      const dayStr = startOfDay(checkDay).toISOString().slice(0, 10);
-      const hasSession = completedSessions.some((s) => s.started_at.slice(0, 10) === dayStr);
-      if (!hasSession) break;
-      streak++;
-      checkDay = subDays(checkDay, 1);
-    }
-
-    // Category distribution
-    const categoryMap = new Map<string, { name: string; color: string; minutes: number }>();
-    completedSessions
-      .filter((s) => new Date(s.started_at) >= monthAgo)
-      .forEach((s) => {
-        if (!s.category) return;
-        const key = s.category.name;
-        const existing = categoryMap.get(key);
-        if (existing) {
-          existing.minutes += s.duration_minutes;
-        } else {
-          categoryMap.set(key, { name: s.category.name, color: s.category.color, minutes: s.duration_minutes });
-        }
-      });
-
-    const categoryData = Array.from(categoryMap.values());
-
-    // Most studied category this month
-    const topCategory = categoryData.sort((a, b) => b.minutes - a.minutes)[0];
-
-    // Daily average
-    const daysWithSessions = new Set(completedSessions.map((s) => s.started_at.slice(0, 10))).size;
-    const totalMinutes = completedSessions.reduce((acc, s) => acc + s.duration_minutes, 0);
-    const avgDaily = daysWithSessions > 0 ? Math.round(totalMinutes / daysWithSessions) : 0;
-
-    return { weekMinutes, dailyData, streak, categoryData, topCategory, avgDaily };
+    return {
+      hasData: completed.length > 0,
+      summary,
+      dailyData: dailyBuckets(completed, 7, now).map((b) => ({
+        name: format(b.date, 'EEE', { locale: es }),
+        minutos: b.minutes,
+      })),
+      categoryData: categoryTotals(completed, startOfLocalMonth(now)),
+    };
   }, [sessions]);
 
-  if (completedSessions.length === 0) {
+  if (!stats.hasData) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <TrendingUp size={48} className="text-[var(--color-gray-border)] mb-3" />
@@ -128,29 +90,31 @@ export function StudyStats({ sessions }: Props) {
         <StatCard
           icon={Clock}
           label="Esta semana"
-          value={`${Math.round(stats.weekMinutes / 60)}h ${stats.weekMinutes % 60}m`}
+          value={formatMinutes(stats.summary.minutesThisWeek)}
+          sub="últimos 7 días"
         />
         <StatCard
           icon={Flame}
           label="Racha actual"
-          value={`${stats.streak} día${stats.streak !== 1 ? 's' : ''}`}
+          value={`${stats.summary.currentStreak} día${stats.summary.currentStreak !== 1 ? 's' : ''}`}
         />
         <StatCard
           icon={Target}
           label="Más estudiada"
-          value={stats.topCategory?.name ?? '—'}
+          value={stats.summary.topCategoryThisMonth ?? '—'}
           sub="este mes"
         />
         <StatCard
           icon={TrendingUp}
           label="Promedio diario"
-          value={`${stats.avgDaily} min`}
+          value={`${stats.summary.dailyAverage} min`}
+          sub="últimos 7 días"
         />
       </div>
 
       {/* Bar chart */}
       <div>
-        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-3">
+        <h3 className="heading-section text-[var(--color-text)] mb-3">
           Minutos por día (últimos 7 días)
         </h3>
         <ResponsiveContainer width="100%" height={200}>
@@ -169,7 +133,7 @@ export function StudyStats({ sessions }: Props) {
       {/* Pie chart */}
       {stats.categoryData.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-[var(--color-text)] mb-3">
+          <h3 className="heading-section text-[var(--color-text)] mb-3">
             Distribución por categoría (este mes)
           </h3>
           <ResponsiveContainer width="100%" height={220}>

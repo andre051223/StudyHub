@@ -41,20 +41,12 @@ export function formatTime(dateStr: string): string {
   });
 }
 
-export function isOverdue(deadline: string): boolean {
-  return new Date(deadline) < new Date();
-}
-
-export function isDueToday(deadline: string): boolean {
-  const d = new Date(deadline);
-  const today = new Date();
-  return (
-    d.getFullYear() === today.getFullYear() &&
-    d.getMonth() === today.getMonth() &&
-    d.getDate() === today.getDate()
-  );
-}
-
 export function getCircumference(radius: number): number {
   return 2 * Math.PI * radius;
 }
+
+/**
+ * Las fechas límite de las tareas se leen en UTC, no en local: ver la nota de
+ * `lib/deadlines.ts`. Sus helpers viven allí en lugar de aquí para que no se
+ * confundan con `formatDate()`, que sí formatea instantes reales.
+ */

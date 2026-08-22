@@ -11,7 +11,7 @@ export default async function CategoriesPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-6 py-8">
-      <h1 className="text-2xl font-bold text-[var(--color-text)] mb-1">Categorías</h1>
+      <h1 className="heading-page text-[var(--color-text)] mb-1">Categorías</h1>
       <p className="text-[var(--color-text-soft)] text-sm mb-6">
         Organiza tus tareas y sesiones de estudio por materias o áreas.
       </p>

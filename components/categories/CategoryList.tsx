@@ -5,6 +5,7 @@ import { Pencil, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Category } from '@/lib/types';
 import { deleteCategoryAction } from '@/app/(app)/categories/actions';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 
 interface Props {
   categories: Category[];
@@ -13,15 +14,15 @@ interface Props {
 }
 
 export function CategoryList({ categories, onEdit, onDeleted }: Props) {
+  const confirm = useConfirm();
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function handleDelete(cat: Category) {
-    if (
-      !confirm(
-        `¿Eliminar la categoría "${cat.name}"?\n\nLas tareas y sesiones asociadas quedarán sin categoría.`,
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: '¿Eliminar la categoría?',
+      message: `Las tareas y sesiones de «${cat.name}» quedarán sin categoría, pero no se borran.`,
+    });
+    if (!ok) return;
 
     setDeletingId(cat.id);
     const result = await deleteCategoryAction(cat.id);

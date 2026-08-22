@@ -1,30 +1,31 @@
 import { NextRequest } from 'next/server';
 import { TaskModel } from '@/lib/models';
-import { getAuthContext, ok, err } from '@/lib/api/helpers';
+import { createTaskSchema } from '@/lib/api/schemas';
+import { getAuthContext, parseBody, isResponse, ok, errorResponse } from '@/lib/api/helpers';
 
 export async function GET() {
   const ctx = await getAuthContext();
-  if ('status' in ctx) return ctx;
+  if (isResponse(ctx)) return ctx;
 
   try {
     const model = new TaskModel(ctx.supabase);
-    const tasks = await model.findAllByUser(ctx.userId);
-    return ok(tasks);
+    return ok(await model.findAllByUser(ctx.userId));
   } catch (e) {
-    return err((e as Error).message);
+    return errorResponse(e);
   }
 }
 
 export async function POST(req: NextRequest) {
   const ctx = await getAuthContext();
-  if ('status' in ctx) return ctx;
+  if (isResponse(ctx)) return ctx;
+
+  const body = await parseBody(req, createTaskSchema);
+  if (isResponse(body)) return body;
 
   try {
-    const body = await req.json();
     const model = new TaskModel(ctx.supabase);
-    const task = await model.create(body, ctx.userId);
-    return ok(task, 201);
+    return ok(await model.create(body.data, ctx.userId), 201);
   } catch (e) {
-    return err((e as Error).message);
+    return errorResponse(e);
   }
 }

@@ -153,4 +153,58 @@ export class TaskModel extends BaseModel {
     if (error) this.handleError(error);
     return data;
   }
+
+  /**
+   * Fija el orden completo de un cuadrante.
+   *
+   * `position` solo se escribía al crear la tarea, así que el orden dentro de
+   * la columna era el de inserción y arrastrar no lo cambiaba nunca. Al mover
+   * una tarea entre cuadrantes tampoco se recalculaba: llegaba con la posición
+   * que tenía en la columna anterior y quedaba intercalada en un sitio
+   * arbitrario.
+   *
+   * Recibe el cuadrante de destino y el orden final completo de esa columna
+   * —la tarea movida incluida— y reescribe las posiciones como 0..n-1. Pasar
+   * la lista entera en lugar de un delta hace la operación idempotente:
+   * repetirla o reintentarla deja exactamente el mismo estado.
+   */
+  async reorder(
+    quadrant: TaskQuadrant,
+    orderedIds: string[],
+    userId: string
+  ): Promise<void> {
+    if (orderedIds.length === 0) return;
+
+    if (new Set(orderedIds).size !== orderedIds.length) {
+      throw new Error('El orden recibido contiene tareas repetidas.');
+    }
+
+    // Pertenencia antes de escribir nada: si alguna de las tareas no es del
+    // usuario, no se toca ninguna.
+    const { data: owned, error: ownershipError } = await this.supabase
+      .from('tasks')
+      .select('id')
+      .eq('user_id', userId)
+      .in('id', orderedIds);
+    if (ownershipError) this.handleError(ownershipError);
+    if ((owned?.length ?? 0) !== orderedIds.length) {
+      throw new Error('Alguna de las tareas ya no existe.');
+    }
+
+    // PostgREST no expone un `UPDATE ... FROM (VALUES ...)`, así que va una
+    // consulta por fila. Son las de un solo cuadrante, y el cliente ya pintó
+    // el resultado de forma optimista, así que la latencia no se percibe.
+    const results = await Promise.all(
+      orderedIds.map((id, position) =>
+        this.supabase
+          .from('tasks')
+          .update({ quadrant, position })
+          .eq('id', id)
+          .eq('user_id', userId)
+      )
+    );
+
+    const failed = results.find((r) => r.error);
+    if (failed?.error) this.handleError(failed.error);
+  }
 }

@@ -12,7 +12,7 @@ export default async function ProfilePage() {
 
   return (
     <main className="max-w-2xl mx-auto px-6 py-8">
-      <h1 className="text-2xl font-bold text-[var(--color-text)] mb-6">Mi perfil</h1>
+      <h1 className="heading-page text-[var(--color-text)] mb-6">Mi perfil</h1>
       <ProfileClient profile={profile} email={user?.email ?? ''} />
     </main>
   );
