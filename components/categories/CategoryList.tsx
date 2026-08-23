@@ -56,7 +56,13 @@ export function CategoryList({ categories, onEdit, onDeleted }: Props) {
           <span className="flex-1 text-sm font-medium text-[var(--color-text)]">
             {cat.name}
           </span>
-          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {/*
+            Visibles siempre en pantallas táctiles (no hay hover que revele
+            los botones) y, en escritorio, también cuando el foco entra en el
+            grupo: con solo `group-hover` navegar con Tab enfocaba botones
+            invisibles.
+          */}
+          <div className="flex gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
             <button
               onClick={() => onEdit(cat)}
               className="p-1.5 text-[var(--color-gray-mid)] hover:text-[var(--color-text)] hover:bg-[var(--color-gray-light)] rounded-lg transition-colors"

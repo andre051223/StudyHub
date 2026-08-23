@@ -12,26 +12,17 @@ export interface UpdateCategoryInput {
   color?: string;
 }
 
-const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
-
+/**
+ * Formato y longitud ya no se comprueban aquí: los dos caminos de escritura
+ * —las Server Actions y los route handlers— validan la entrada contra
+ * `createCategorySchema`/`updateCategorySchema` antes de llamar al modelo, y
+ * la migración 002 declara los CHECK equivalentes en la propia tabla. Este
+ * modelo solo se ocupa de las reglas que necesitan consultar la base: la
+ * unicidad del nombre y la existencia de la fila.
+ */
 export class CategoryModel extends BaseModel {
   constructor(supabase: SupabaseClient) {
     super(supabase);
-  }
-
-  private validateName(name: string): string {
-    const trimmed = name.trim();
-    if (trimmed.length < 2 || trimmed.length > 40) {
-      throw new Error('El nombre debe tener entre 2 y 40 caracteres.');
-    }
-    return trimmed;
-  }
-
-  private validateColor(color: string): string {
-    if (!HEX_COLOR_RE.test(color)) {
-      throw new Error('El color debe ser un valor hexadecimal válido (#RRGGBB).');
-    }
-    return color;
   }
 
   async findAllByUser(userId: string): Promise<Category[]> {
@@ -67,8 +58,8 @@ export class CategoryModel extends BaseModel {
   }
 
   async create(input: CreateCategoryInput, userId: string): Promise<Category> {
-    const name = this.validateName(input.name);
-    const color = this.validateColor(input.color);
+    const name = input.name.trim();
+    const { color } = input;
 
     const existing = await this.findByName(name, userId);
     if (existing) {
@@ -91,7 +82,7 @@ export class CategoryModel extends BaseModel {
     const updates: Partial<CreateCategoryInput> = {};
 
     if (input.name !== undefined) {
-      const name = this.validateName(input.name);
+      const name = input.name.trim();
       if (name !== current.name) {
         const duplicate = await this.findByName(name, userId);
         if (duplicate) throw new Error(`Ya existe una categoría con el nombre "${name}".`);
@@ -100,7 +91,7 @@ export class CategoryModel extends BaseModel {
     }
 
     if (input.color !== undefined) {
-      updates.color = this.validateColor(input.color);
+      updates.color = input.color;
     }
 
     const { data, error } = await this.supabase
@@ -114,27 +105,29 @@ export class CategoryModel extends BaseModel {
     return data;
   }
 
+  /**
+   * Borra la categoría. Las tareas y las sesiones asociadas se quedan sin
+   * categoría, pero no se borran.
+   *
+   * Antes eso se hacía a mano con dos UPDATE previos, lo cual era a la vez
+   * redundante y frágil: `tasks.category_id` y `study_sessions.category_id`
+   * están declaradas `ON DELETE SET NULL` (001_initial.sql:137 y :187), así
+   * que Postgres las limpia en la misma transacción que el DELETE. Los UPDATE
+   * manuales, además, no comprobaban su propio `error` y podían dejar las
+   * tareas desasociadas de una categoría que seguía existiendo si el borrado
+   * fallaba después.
+   *
+   * El `count` sustituye al `findById` previo: si no se borró ninguna fila, o
+   * el id no existe o es de otro usuario —indistinguibles a propósito, para no
+   * revelar la existencia de categorías ajenas.
+   */
   async delete(id: string, userId: string): Promise<void> {
-    const current = await this.findById(id, userId);
-    if (!current) throw new Error('Categoría no encontrada.');
-    await Promise.all([
-      this.supabase
-        .from('tasks')
-        .update({ category_id: null })
-        .eq('category_id', id)
-        .eq('user_id', userId),
-      this.supabase
-        .from('study_sessions')
-        .update({ category_id: null })
-        .eq('category_id', id)
-        .eq('user_id', userId),
-    ]);
-
-    const { error } = await this.supabase
+    const { error, count } = await this.supabase
       .from('categories')
-      .delete()
+      .delete({ count: 'exact' })
       .eq('id', id)
       .eq('user_id', userId);
     if (error) this.handleError(error);
+    if (!count) throw new Error('Categoría no encontrada.');
   }
 }

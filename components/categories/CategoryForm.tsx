@@ -2,23 +2,18 @@
 
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
+import type { z } from 'zod';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Category } from '@/lib/types';
+import { createCategorySchema } from '@/lib/api/schemas';
 import { createCategoryAction, updateCategoryAction } from '@/app/(app)/categories/actions';
 
-const schema = z.object({
-  name: z
-    .string()
-    .min(2, 'El nombre debe tener al menos 2 caracteres.')
-    .max(40, 'El nombre no puede superar los 40 caracteres.'),
-  color: z
-    .string()
-    .regex(/^#[0-9a-fA-F]{6}$/, 'Color hexadecimal inválido.'),
-});
-
-type FormValues = z.infer<typeof schema>;
+// El mismo esquema que valida la Server Action. Antes había aquí una copia sin
+// `.trim()`, así que "  Mate  " pasaba el formulario y el servidor lo guardaba
+// recortado —el usuario veía un nombre distinto al que escribió— y "  a  "
+// pasaba el min(2) del cliente para fallar después en el servidor.
+type FormValues = z.infer<typeof createCategorySchema>;
 
 const PRESET_COLORS = [
   '#67b31f', '#3b82f6', '#f97316', '#ef4444',
@@ -42,7 +37,7 @@ export function CategoryForm({ category, onSuccess, onCancel }: Props) {
     watch,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(createCategorySchema),
     defaultValues: {
       name: category?.name ?? '',
       color: category?.color ?? '#67b31f',

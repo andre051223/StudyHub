@@ -13,10 +13,17 @@ import {
 } from '@/lib/api/actions';
 import type { Category } from '@/lib/types';
 
-// Reexportado porque los componentes de categorías ya importaban el tipo desde
-// aquí; la definición vive ahora en lib/api/actions.ts, compartida con las
-// acciones de tareas y del temporizador.
-export type { ActionResult };
+/**
+ * Las categorías no se pintan solo en /categories: las tres vistas de tareas y
+ * el temporizador las leen embebidas (`select('*, category:categories(*)')`),
+ * así que revalidar únicamente /categories dejaba el nombre o el color viejo en
+ * pantalla al navegar a cualquiera de ellas.
+ */
+const CATEGORY_VIEWS = ['/categories', '/tasks', '/agenda', '/dashboard', '/timer'];
+
+function revalidateCategoryViews() {
+  for (const path of CATEGORY_VIEWS) revalidatePath(path);
+}
 
 export async function createCategoryAction(
   input: unknown
@@ -27,7 +34,7 @@ export async function createCategoryAction(
   try {
     const { supabase, userId } = await requireUser();
     const category = await new CategoryModel(supabase).create(parsed.data, userId);
-    revalidatePath('/categories');
+    revalidateCategoryViews();
     return actionOk(category);
   } catch (e) {
     return actionError(e, 'No se pudo crear la categoría.');
@@ -46,7 +53,7 @@ export async function updateCategoryAction(
   try {
     const { supabase, userId } = await requireUser();
     const category = await new CategoryModel(supabase).update(id, parsed.data, userId);
-    revalidatePath('/categories');
+    revalidateCategoryViews();
     return actionOk(category);
   } catch (e) {
     return actionError(e, 'No se pudo actualizar la categoría.');
@@ -59,7 +66,7 @@ export async function deleteCategoryAction(id: string): Promise<ActionResult<nul
   try {
     const { supabase, userId } = await requireUser();
     await new CategoryModel(supabase).delete(id, userId);
-    revalidatePath('/categories');
+    revalidateCategoryViews();
     return actionOk(null);
   } catch (e) {
     return actionError(e, 'No se pudo eliminar la categoría.');
