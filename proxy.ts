@@ -20,6 +20,7 @@ export const config = {
     '/notes/:path*',
     '/tasks/:path*',
     '/timer/:path*',
+    '/agenda/:path*',
     '/categories/:path*',
     '/profile/:path*',
     '/login',

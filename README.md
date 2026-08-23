@@ -95,6 +95,7 @@ StudyHub implementa el patrón **Modelo — Vista — Controlador** aprovechando
 │  ├── folders/route.ts          GET · POST                           │
 │  ├── folders/[id]/route.ts     GET · PATCH · DELETE                 │
 │  ├── sessions/route.ts         GET · POST                           │
+│  ├── sessions/[id]/route.ts    GET · PATCH · DELETE                 │
 │  └── soap/route.ts             GET (WSDL) · POST (envelope XML)     │
 │                                                                     │
 │  app/(app)/**/actions.ts  — Server Actions                          │
@@ -477,13 +478,14 @@ studyhub/
 │   │   ├── tasks/                    # route.ts · [id]/route.ts
 │   │   ├── notes/                    # route.ts · [id]/route.ts
 │   │   ├── folders/                  # route.ts · [id]/route.ts
-│   │   ├── sessions/route.ts         # GET · POST
+│   │   ├── sessions/                 # route.ts · [id]/route.ts
 │   │   └── soap/route.ts             # GET (WSDL) · POST (envelope)
 │   ├── icons/                        # icon-192, icon-512 (rutas dinámicas PWA)
 │   ├── screenshots/[variant]/        # Capturas wide/narrow del manifest (PWA)
 │   ├── icon.tsx / apple-icon.tsx     # Favicons generados
 │   ├── manifest.ts                   # Web App Manifest: iconos, capturas y shortcuts
 │   ├── layout.tsx                    # Layout raíz (theme init, fuente, Toaster, SW)
+│   ├── loading.tsx                   # Esqueleto de carga de las rutas públicas
 │   ├── page.tsx                      # Landing pública
 │   └── globals.css                   # Tokens de tema (@theme) + estilos Tiptap
 │
@@ -494,14 +496,17 @@ studyhub/
 │   ├── tasks/                        # TasksClient, KanbanColumn, TaskCard, TaskModal
 │   ├── agenda/                       # AgendaClient — vista semanal de fechas límite
 │   ├── timer/                        # TimerClient, MiniTimer, SessionHistory,
-│   │                                 #   StudyStats, StudyGoals
+│   │                                 #   SessionForm (alta y edición manual),
+│   │                                 #   StudyStats, StudyGoals, CategoryBreakdown,
+│   │                                 #   StudyHeatmap, StudyPatterns, focusRating
 │   ├── categories/                   # CategoriesClient, CategoryForm, CategoryList
 │   └── shared/                       # Navbar, CommandPalette, Modal, ConfirmProvider,
 │                                     #   ThemeToggle, ProfileClient, InstallPrompt,
-│                                     #   ServiceWorkerRegistrar
+│                                     #   ServiceWorkerRegistrar, LocalTimestamp
 │
 ├── hooks/
-│   └── useMediaQuery.ts              # Media query con useSyncExternalStore
+│   ├── useMediaQuery.ts              # Media query con useSyncExternalStore
+│   └── useLocalToday.ts              # Día local del usuario, estable entre renders
 │
 ├── lib/
 │   ├── supabase/

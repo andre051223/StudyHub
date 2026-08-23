@@ -36,6 +36,7 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith('/notes') ||
     pathname.startsWith('/tasks') ||
     pathname.startsWith('/timer') ||
+    pathname.startsWith('/agenda') ||
     pathname.startsWith('/categories') ||
     pathname.startsWith('/profile');
 
