@@ -8,6 +8,8 @@ export interface CreateTaskInput {
   quadrant: TaskQuadrant;
   deadline?: string | null;
   category_id?: string | null;
+  /** Estimación opcional en minutos (migración 009). */
+  estimated_minutes?: number | null;
 }
 
 export interface UpdateTaskInput {
@@ -16,6 +18,7 @@ export interface UpdateTaskInput {
   quadrant?: TaskQuadrant;
   deadline?: string | null;
   category_id?: string | null;
+  estimated_minutes?: number | null;
   completed?: boolean;
   position?: number;
 }
@@ -64,6 +67,7 @@ export class TaskModel extends BaseModel {
         quadrant: input.quadrant,
         deadline: input.deadline ?? null,
         category_id: input.category_id ?? null,
+        estimated_minutes: input.estimated_minutes ?? null,
         position: count ?? 0,
         user_id: userId,
       })
@@ -87,6 +91,7 @@ export class TaskModel extends BaseModel {
     if (input.quadrant !== undefined) updates.quadrant = input.quadrant;
     if (input.deadline !== undefined) updates.deadline = input.deadline;
     if (input.category_id !== undefined) updates.category_id = input.category_id;
+    if (input.estimated_minutes !== undefined) updates.estimated_minutes = input.estimated_minutes;
     if (input.position !== undefined) updates.position = input.position;
     if (input.completed !== undefined) {
       updates.completed = input.completed;

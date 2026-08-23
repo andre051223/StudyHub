@@ -8,21 +8,19 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  PieChart,
-  Pie,
-  Cell,
   ResponsiveContainer,
 } from 'recharts';
 import { Flame, Clock, Target, TrendingUp } from 'lucide-react';
 import {
   onlyCompleted,
   dailyBuckets,
-  categoryTotals,
-  startOfLocalMonth,
   summarize,
   formatMinutes,
   type StatsSession,
 } from '@/lib/stats';
+import { CategoryBreakdown } from './CategoryBreakdown';
+import { StudyHeatmap } from './StudyHeatmap';
+import { StudyPatterns } from './StudyPatterns';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -63,13 +61,13 @@ export function StudyStats({ sessions }: Props) {
     const summary = summarize(completed, now);
 
     return {
+      completed,
       hasData: completed.length > 0,
       summary,
       dailyData: dailyBuckets(completed, 7, now).map((b) => ({
         name: format(b.date, 'EEE', { locale: es }),
         minutos: b.minutes,
       })),
-      categoryData: categoryTotals(completed, startOfLocalMonth(now)),
     };
   }, [sessions]);
 
@@ -130,36 +128,15 @@ export function StudyStats({ sessions }: Props) {
         </ResponsiveContainer>
       </div>
 
-      {/* Pie chart */}
-      {stats.categoryData.length > 0 && (
-        <div>
-          <h3 className="heading-section text-[var(--color-text)] mb-3">
-            Distribución por categoría (este mes)
-          </h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <PieChart>
-              <Pie
-                data={stats.categoryData}
-                dataKey="minutes"
-                nameKey="name"
-                cx="50%"
-                cy="50%"
-                outerRadius={80}
-                label={({ name, percent }: { name?: string; percent?: number }) => `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`}
-                labelLine={false}
-              >
-                {stats.categoryData.map((entry, i) => (
-                  <Cell key={i} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip
-                contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-gray-border)', fontSize: '12px' }}
-                formatter={(value: unknown) => [`${value ?? 0} min`, 'Tiempo'] as [string, string]}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      )}
+      {/* Desglose por categoría: tabla ordenable con filtro de rango. */}
+      <CategoryBreakdown sessions={stats.completed} />
+
+      {/* Constancia: lo que ni la racha ni la barra de 7 días alcanzan a ver.
+          La ventana arranca en la primera sesión, no hace un año. */}
+      <StudyHeatmap sessions={stats.completed} />
+
+      {/* Franja horaria y calidad percibida. */}
+      <StudyPatterns sessions={stats.completed} />
     </div>
   );
 }

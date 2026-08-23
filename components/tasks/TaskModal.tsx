@@ -9,6 +9,7 @@ import type { Task, Subtask, TaskQuadrant, Category } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 import { addSubtaskAction } from '@/app/(app)/tasks/actions';
 import { taskQuadrantSchema } from '@/lib/api/schemas';
+import { formatMinutes } from '@/lib/stats';
 import { Modal } from '@/components/shared/Modal';
 import { toast } from 'sonner';
 
@@ -20,6 +21,16 @@ const schema = z.object({
   quadrant: taskQuadrantSchema,
   deadline: z.string().optional(),
   category_id: z.string().optional(),
+  // Vacío = sin estimar. Se deja como texto y se convierte al enviar: un
+  // `z.number()` sobre un input vacío da NaN y bloquea el formulario entero
+  // por un campo que es opcional.
+  estimated_minutes: z
+    .string()
+    .optional()
+    .refine(
+      (v) => !v || (Number.isInteger(Number(v)) && Number(v) >= 5 && Number(v) <= 6000),
+      'La estimación debe ser un número entero entre 5 y 6000 minutos.'
+    ),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -49,6 +60,7 @@ export function TaskModal({ task, defaultQuadrant, categories, onSave, onDelete,
   const [newSubtask, setNewSubtask] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const studiedMinutes = Math.round((task?.studied_seconds ?? 0) / 60);
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -58,6 +70,7 @@ export function TaskModal({ task, defaultQuadrant, categories, onSave, onDelete,
       quadrant: task?.quadrant ?? defaultQuadrant,
       deadline: task?.deadline ? task.deadline.slice(0, 10) : '',
       category_id: task?.category_id ?? '',
+      estimated_minutes: task?.estimated_minutes != null ? String(task.estimated_minutes) : '',
     },
   });
 
@@ -70,6 +83,7 @@ export function TaskModal({ task, defaultQuadrant, categories, onSave, onDelete,
       quadrant: data.quadrant,
       deadline: data.deadline || null,
       category_id: data.category_id || null,
+      estimated_minutes: data.estimated_minutes ? Number(data.estimated_minutes) : null,
     });
     setSaving(false);
   }
@@ -123,7 +137,7 @@ export function TaskModal({ task, defaultQuadrant, categories, onSave, onDelete,
             className="w-full px-4 py-2.5 rounded-lg border border-[var(--color-gray-border)] text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] transition-all"
             {...register('title')}
           />
-          {errors.title && <p className="mt-1 text-xs text-red-500">{errors.title.message}</p>}
+          {errors.title && <p className="mt-1 text-xs text-red-500 dark:text-red-400">{errors.title.message}</p>}
         </div>
 
         {/* Description */}
@@ -158,7 +172,7 @@ export function TaskModal({ task, defaultQuadrant, categories, onSave, onDelete,
           </div>
         </div>
 
-        {/* Deadline + Category row */}
+        {/* Deadline + Category + estimación */}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium text-[var(--color-text)] mb-1.5">
@@ -184,6 +198,37 @@ export function TaskModal({ task, defaultQuadrant, categories, onSave, onDelete,
               ))}
             </select>
           </div>
+        </div>
+
+        {/* Estimación (migración 009). Sin ella, el tiempo dedicado que
+            muestra la tarjeta es un dato sin veredicto: no distingue «me
+            cundió» de «se me fue el doble». */}
+        <div>
+          <label
+            htmlFor="task-estimate"
+            className="block text-sm font-medium text-[var(--color-text)] mb-1.5"
+          >
+            Tiempo estimado (min)
+          </label>
+          <input
+            id="task-estimate"
+            type="number"
+            min={5}
+            max={6000}
+            placeholder="Opcional — p. ej. 90"
+            className="w-full px-4 py-2.5 rounded-lg border border-[var(--color-gray-border)] text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] transition-all"
+            {...register('estimated_minutes')}
+          />
+          {errors.estimated_minutes && (
+            <p className="mt-1 text-xs text-red-500 dark:text-red-400">
+              {errors.estimated_minutes.message}
+            </p>
+          )}
+          {studiedMinutes > 0 && (
+            <p className="text-meta mt-1.5">
+              Llevas {formatMinutes(studiedMinutes)} estudiados en esta tarea.
+            </p>
+          )}
         </div>
 
         {/* Subtasks (only when editing) */}

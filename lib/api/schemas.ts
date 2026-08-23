@@ -85,6 +85,15 @@ export const createTaskSchema = z.object({
   quadrant: taskQuadrantSchema,
   deadline: dateLike.nullish(),
   category_id: uuid.nullish(),
+  // Estimación opcional (migración 009). El rango replica su CHECK: por
+  // debajo de 5 min no vale la pena estimar, y 6000 (100 h) cubre un trabajo
+  // de semestre sin dejar pasar un error de tecleo.
+  estimated_minutes: z
+    .number()
+    .int()
+    .min(5, 'La estimación debe ser de al menos 5 minutos.')
+    .max(6000, 'La estimación no puede superar los 6000 minutos.')
+    .nullish(),
 });
 
 export const updateTaskSchema = createTaskSchema.partial().extend({
@@ -115,7 +124,10 @@ export const createSubtaskSchema = z.object({
 // ─────────────────────────────────────────────────────────────
 // Sesiones de estudio
 // ─────────────────────────────────────────────────────────────
-export const studyModeSchema = z.enum(['simple', 'stopwatch', 'pomodoro']);
+export const studyModeSchema = z.enum(['simple', 'stopwatch', 'pomodoro', 'manual']);
+
+/** Calidad percibida de la sesión (migración 009). */
+export const focusRatingSchema = z.enum(['focused', 'ok', 'distracted']);
 
 export const createSessionSchema = z.object({
   category_id: uuid.nullish(),
@@ -132,7 +144,31 @@ export const createSessionSchema = z.object({
   started_at: dateLike,
   completed_at: dateLike.nullish(),
   notes: z.string().max(2000).nullish(),
+  focus_rating: focusRatingSchema.nullish(),
 });
+
+/**
+ * Edición de una sesión ya guardada.
+ *
+ * Todo es opcional porque hay dos usos muy distintos: corregir una sesión
+ * entera desde el historial, y responder solo «¿cómo fue?» al terminar. El
+ * modo **no** se puede cambiar: es un hecho sobre cómo se midió el tiempo, no
+ * una preferencia, y permitir reescribirlo dejaría el historial sin forma de
+ * distinguir lo cronometrado de lo recordado.
+ */
+export const updateSessionSchema = z
+  .object({
+    category_id: uuid.nullish(),
+    task_id: uuid.nullish(),
+    duration_minutes: z.number().int().min(1).max(1440).nullish(),
+    actual_duration_seconds: z.number().int().min(0),
+    started_at: dateLike,
+    completed_at: dateLike.nullish(),
+    notes: z.string().max(2000).nullish(),
+    focus_rating: focusRatingSchema.nullish(),
+  })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, 'No hay nada que actualizar.');
 
 // ─────────────────────────────────────────────────────────────
 // Metas de estudio (columnas de `profiles`)
@@ -150,6 +186,39 @@ export const updateGoalsSchema = z.object({
     .min(30, 'La meta semanal debe ser de al menos 30 minutos.')
     .max(2400, 'La meta semanal no puede superar los 2400 minutos.'),
 });
+
+/**
+ * Ajustes del ciclo Pomodoro. Los rangos replican el CHECK de la migración
+ * 009, incluida la relación entre los dos descansos: un descanso «largo» más
+ * corto que el corto haría que el ciclo dejara de tener sentido.
+ */
+export const updatePomodoroSchema = z
+  .object({
+    pomodoro_focus_minutes: z
+      .number()
+      .int()
+      .min(5, 'El bloque de foco debe ser de al menos 5 minutos.')
+      .max(90, 'El bloque de foco no puede superar los 90 minutos.'),
+    pomodoro_break_minutes: z
+      .number()
+      .int()
+      .min(1, 'El descanso corto debe ser de al menos 1 minuto.')
+      .max(30, 'El descanso corto no puede superar los 30 minutos.'),
+    pomodoro_long_break_minutes: z
+      .number()
+      .int()
+      .min(5, 'El descanso largo debe ser de al menos 5 minutos.')
+      .max(60, 'El descanso largo no puede superar los 60 minutos.'),
+    pomodoro_cycles_before_long_break: z
+      .number()
+      .int()
+      .min(2, 'Debe haber al menos 2 bloques antes del descanso largo.')
+      .max(8, 'No puede haber más de 8 bloques antes del descanso largo.'),
+  })
+  .refine(
+    (v) => v.pomodoro_long_break_minutes >= v.pomodoro_break_minutes,
+    'El descanso largo no puede ser más corto que el corto.'
+  );
 
 export const updateProfileSchema = z.object({
   full_name: z

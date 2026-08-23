@@ -9,32 +9,45 @@ import {
   summarize,
   type StatsSession,
 } from '@/lib/stats';
+import { useLocalToday } from '@/hooks/useLocalToday';
 
 interface Props {
   sessions: StatsSession[];
   dailyGoal: number;
 }
 
+/** Lo que se pinta mientras el navegador no ha dicho aún en qué día está. */
+const PENDING = '—';
+
 /**
  * La franja «hoy» del dashboard: meta diaria, racha y semana.
  *
- * Es un componente de cliente a propósito, aunque no tenga estado. Todo
- * `lib/stats.ts` agrupa por el día natural del usuario usando los getters
- * locales, y en el servidor «local» es la zona del servidor (UTC en Vercel):
- * calculado allí, un repaso de las 20:00 en Colombia contaría como estudio de
- * mañana y la racha se rompería sola. En el navegador la zona es la correcta.
+ * Todo `lib/stats.ts` agrupa por el día natural del usuario usando los getters
+ * locales, y durante el render de servidor «local» es la zona del servidor
+ * (UTC en Vercel): calculado allí, un repaso de las 20:00 en Colombia contaría
+ * como estudio de mañana y la racha se rompería sola.
+ *
+ * Marcar el componente como de cliente **no** basta: un componente de cliente
+ * también se renderiza en el servidor. Por eso el día lo aporta
+ * `useLocalToday()`, que devuelve null hasta que hay navegador; hasta entonces
+ * se pinta la estructura con los huecos vacíos, sin inventar números.
  */
 export function TodayStats({ sessions, dailyGoal }: Props) {
-  const { summary, week } = useMemo(() => {
+  const todayMs = useLocalToday();
+
+  const data = useMemo(() => {
+    if (todayMs === null) return null;
+    const now = new Date(todayMs);
     const completed = onlyCompleted(sessions);
     return {
-      summary: summarize(completed),
-      week: dailyBuckets(completed, 7),
+      summary: summarize(completed, now),
+      week: dailyBuckets(completed, 7, now),
     };
-  }, [sessions]);
+  }, [sessions, todayMs]);
 
-  const goalPct = Math.min(100, Math.round((summary.minutesToday / dailyGoal) * 100));
-  const remaining = Math.max(0, dailyGoal - summary.minutesToday);
+  const goalPct = data ? Math.min(100, Math.round((data.summary.minutesToday / dailyGoal) * 100)) : 0;
+  const remaining = data ? Math.max(0, dailyGoal - data.summary.minutesToday) : 0;
+  const week = data?.week ?? [];
   const peak = Math.max(...week.map((d) => d.minutes), 1);
 
   return (
@@ -47,7 +60,7 @@ export function TodayStats({ sessions, dailyGoal }: Props) {
         </div>
 
         <p className="text-3xl font-bold text-[var(--color-text)] tabular-nums">
-          {formatMinutes(summary.minutesToday)}
+          {data ? formatMinutes(data.summary.minutesToday) : PENDING}
           <span className="text-base font-medium text-[var(--color-gray-mid)]">
             {' '}/ {formatMinutes(dailyGoal)}
           </span>
@@ -67,10 +80,10 @@ export function TodayStats({ sessions, dailyGoal }: Props) {
           />
         </div>
 
-        <p className="text-meta mt-2">
-          {remaining === 0
-            ? '¡Meta cumplida!'
-            : `Faltan ${formatMinutes(remaining)}`}
+        {/* La altura se reserva siempre para que la tarjeta no dé un salto
+            cuando llega el dato del navegador. */}
+        <p className="text-meta mt-2 min-h-[1.1em]">
+          {!data ? '' : remaining === 0 ? '¡Meta cumplida!' : `Faltan ${formatMinutes(remaining)}`}
         </p>
       </section>
 
@@ -81,17 +94,20 @@ export function TodayStats({ sessions, dailyGoal }: Props) {
           <h2 className="text-eyebrow">Racha</h2>
         </div>
 
-        <p className="text-3xl font-bold text-orange-500 tabular-nums">
-          {summary.currentStreak}
+        <p className="text-3xl font-bold text-orange-500 dark:text-orange-400 tabular-nums">
+          {data ? data.summary.currentStreak : PENDING}
           <span className="text-base font-medium text-[var(--color-gray-mid)]">
-            {' '}{summary.currentStreak === 1 ? 'día' : 'días'}
+            {' '}
+            {data && data.summary.currentStreak === 1 ? 'día' : 'días'}
           </span>
         </p>
 
-        <p className="text-meta mt-3">
-          {summary.currentStreak === 0
+        <p className="text-meta mt-3 min-h-[1.1em]">
+          {!data
+            ? ''
+            : data.summary.currentStreak === 0
             ? 'Estudia hoy para empezar una.'
-            : summary.minutesToday > 0
+            : data.summary.minutesToday > 0
             ? 'Hoy ya cuenta. Sigue así.'
             : 'Estudia hoy para no perderla.'}
         </p>
@@ -105,23 +121,35 @@ export function TodayStats({ sessions, dailyGoal }: Props) {
         </div>
 
         <p className="text-3xl font-bold text-[var(--color-text)] tabular-nums">
-          {formatMinutes(summary.minutesThisWeek)}
+          {data ? formatMinutes(data.summary.minutesThisWeek) : PENDING}
         </p>
 
-        {/* Barras diarias: los huecos son información, así que se pintan. */}
+        {/* Barras diarias: los huecos son información, así que se pintan.
+            El `title` solo se añade cuando ya hay día local; añadirlo antes
+            volvería a meter una fecha formateada en el HTML del servidor. */}
         <div className="mt-3 flex items-end gap-1 h-8" aria-hidden>
-          {week.map((day) => (
-            <div
-              key={day.key}
-              title={`${day.date.toLocaleDateString('es-CO', { weekday: 'short' })}: ${day.minutes} min`}
-              className="flex-1 rounded-sm bg-[var(--color-primary)]/25 min-h-[2px]"
-              style={{ height: `${Math.max(4, (day.minutes / peak) * 100)}%` }}
-            />
-          ))}
+          {data
+            ? week.map((day) => (
+                <div
+                  key={day.key}
+                  title={`${day.date.toLocaleDateString('es-CO', { weekday: 'short' })}: ${
+                    day.minutes
+                  } min`}
+                  className="flex-1 rounded-sm bg-[var(--color-primary)]/25 min-h-[2px]"
+                  style={{ height: `${Math.max(4, (day.minutes / peak) * 100)}%` }}
+                />
+              ))
+            : Array.from({ length: 7 }, (_, i) => (
+                <div
+                  key={i}
+                  className="flex-1 rounded-sm bg-[var(--color-primary)]/25 min-h-[2px]"
+                  style={{ height: '4%' }}
+                />
+              ))}
         </div>
 
-        <p className="text-meta mt-2">
-          Promedio de {formatMinutes(summary.dailyAverage)} al día
+        <p className="text-meta mt-2 min-h-[1.1em]">
+          {data ? `Promedio de ${formatMinutes(data.summary.dailyAverage)} al día` : ''}
         </p>
       </section>
     </div>

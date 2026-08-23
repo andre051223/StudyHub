@@ -62,7 +62,7 @@ export function ProfileClient({ profile, email }: Props) {
             {...register('full_name')}
           />
           {errors.full_name && (
-            <p className="mt-1 text-xs text-red-500">{errors.full_name.message}</p>
+            <p className="mt-1 text-xs text-red-500 dark:text-red-400">{errors.full_name.message}</p>
           )}
         </div>
 

@@ -238,6 +238,7 @@ export function TasksClient({ initialTasks, categories }: Props) {
         quadrant: data.quadrant ?? newTaskQuadrant,
         deadline: data.deadline ?? null,
         category_id: data.category_id ?? null,
+        estimated_minutes: data.estimated_minutes ?? null,
       });
 
       if (!result.ok) { toast.error(result.error); return; }
@@ -250,6 +251,7 @@ export function TasksClient({ initialTasks, categories }: Props) {
         quadrant: data.quadrant,
         deadline: data.deadline ?? null,
         category_id: data.category_id ?? null,
+        estimated_minutes: data.estimated_minutes ?? null,
       });
 
       if (!result.ok) { toast.error(result.error); return; }

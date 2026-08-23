@@ -263,6 +263,9 @@ Valores válidos para `quadrant`: `urgent_important` · `not_urgent_important` �
 |--------|------|-------------|
 | `GET` | `/api/sessions` | Historial de sesiones con categoría |
 | `POST` | `/api/sessions` | Registra una sesión completada o abandonada |
+| `GET` | `/api/sessions/:id` | Una sesión concreta |
+| `PATCH` | `/api/sessions/:id` | Corrige una sesión guardada (o solo la califica) |
+| `DELETE` | `/api/sessions/:id` | Elimina la sesión del historial y de las estadísticas |
 
 **POST `/api/sessions` — body:**
 ```json
@@ -272,11 +275,16 @@ Valores válidos para `quadrant`: `urgent_important` · `not_urgent_important` �
   "mode": "simple",
   "started_at": "2026-05-16T14:00:00Z",
   "completed_at": "2026-05-16T14:24:47Z",
-  "category_id": "uuid-aqui"
+  "category_id": "uuid-aqui",
+  "focus_rating": "focused"
 }
 ```
 
-Valores válidos para `mode`: `simple` · `stopwatch` (`pomodoro` se conserva solo por compatibilidad con sesiones antiguas).
+Valores válidos para `mode`: `simple` · `stopwatch` · `pomodoro` · `manual`. La duración *planeada* depende del modo: 10–120 min en `simple`, 5–90 en `pomodoro`, y `null` obligatorio en `stopwatch` y `manual`, que no planean nada.
+
+`focus_rating` es opcional y admite `focused` · `ok` · `distracted`.
+
+`PATCH` acepta cualquier subconjunto de los campos anteriores **salvo `mode`**: cómo se midió el tiempo es un hecho, no una preferencia, y poder reescribirlo dejaría el historial sin forma de distinguir lo cronometrado de lo registrado a mano.
 
 #### Respuestas de error
 
@@ -545,7 +553,8 @@ studyhub/
 │       ├── 005_data_integrity.sql            # Defaults de user_id, RLS con WITH CHECK
 │       ├── 006_task_sessions.sql             # study_sessions.task_id + política cruzada
 │       ├── 007_global_search.sql             # search_everything() + índice de tareas
-│       └── 008_onboarding.sql                # Siembra de la cuenta nueva (trigger)
+│       ├── 008_onboarding.sql                # Siembra de la cuenta nueva (trigger)
+│       └── 009_study_insights.sql            # Estimación, calidad de sesión y Pomodoro
 │
 ├── markdown/Context.md         # Documento de contexto de la aplicación
 ├── proxy.ts                    # Refresco de sesión en el borde (matcher explícito)
@@ -635,8 +644,11 @@ Registra sesiones de estudio con estadísticas para seguimiento del hábito.
 - `MiniTimer` para ver el timer activo desde otras vistas.
 - **Notificaciones sonoras** (`public/sounds/bell.wav`) y **Web Notifications API** al completar.
 - **Historial** de sesiones con filtros (fecha, duración, categoría) y la tarea asociada.
-- **Estadísticas** (Recharts): minutos por día, distribución por categoría, racha actual, categoría top del mes y promedio diario.
-- **Metas** diaria y semanal (`StudyGoals`), guardadas en `profiles` (`daily_goal_minutes`, `weekly_goal_minutes`).
+- **Estadísticas**: minutos por día (gráfica de barras, Recharts), **tabla de tiempo por categoría** ordenable y filtrable por día / semana / mes con comparativa contra el periodo anterior, **mapa de calor de constancia** (desde tu primera sesión, con un techo de un año), **franja horaria favorita** y **calidad percibida** de las sesiones, racha actual, categoría top del mes y promedio diario.
+- **Registro manual** de sesiones estudiadas sin la app, y **edición o borrado** de cualquier sesión del historial.
+- **Pomodoro configurable** (foco, descanso, descanso largo y bloques por tanda), con encadenado automático de fases.
+- **Estimación por tarea** contrastada con el tiempo realmente dedicado, en el Kanban y en el propio temporizador.
+- **Metas** diaria y semanal más los ajustes del Pomodoro (`StudyGoals`), guardados en `profiles` (`daily_goal_minutes`, `weekly_goal_minutes`, `pomodoro_*`).
 
 > Todas las métricas salen de `lib/stats.ts`, que es la única implementación. Suman
 > `actual_duration_seconds` —lo realmente estudiado— y no `duration_minutes` —lo planeado—, y
@@ -722,6 +734,7 @@ cp .env.example .env.local
 # supabase/migrations/006_task_sessions.sql
 # supabase/migrations/007_global_search.sql
 # supabase/migrations/008_onboarding.sql
+# supabase/migrations/009_study_insights.sql
 
 # 5. Iniciar el servidor de desarrollo
 npm run dev
@@ -770,7 +783,7 @@ Las claves se encuentran en el dashboard de Supabase en **Settings → API**.
 
 ## Base de datos
 
-El esquema se construye en **ocho migraciones** ejecutadas en orden. Todas las tablas tienen
+El esquema se construye en **nueve migraciones** ejecutadas en orden. Todas las tablas tienen
 **Row Level Security (RLS)** activado: cada usuario solo puede leer y escribir sus propios
 registros.
 
@@ -837,6 +850,20 @@ arranque y una nota de bienvenida. El sembrado va en un bloque `EXCEPTION` propi
 dentro de la transacción de registro y no debe poder impedir la creación de la cuenta. Las
 cuentas ya existentes no se modifican (la migración deja el SQL comentado por si se quiere
 sembrar una cuenta de pruebas a mano).
+
+### `009_study_insights.sql` — Estimación, calidad de sesión y Pomodoro
+
+- `tasks.estimated_minutes` (nullable, CHECK 5–6000): el tiempo dedicado a una tarea ya se
+  medía desde la 006, pero no había contra qué compararlo. Sin estimación es un dato sin
+  veredicto: no distingue «me cundió» de «se me fue el doble».
+- `study_sessions.focus_rating` (nullable, `focused`/`ok`/`distracted`): dos sesiones de 50
+  minutos no valen lo mismo. Es texto con CHECK y no un enum nuevo porque son tres valores
+  de producto, y ampliar un enum obliga a un `ALTER TYPE` irreversible.
+- `profiles.pomodoro_*`: el modo Pomodoro estaba retirado de la interfaz porque sus tiempos
+  eran constantes en el cliente. Con la configuración en el perfil vuelve a ser un modo real.
+- `study_mode += 'manual'`: hasta ahora una sesión estudiada sin la app solo se podía dar de
+  alta mintiendo sobre el modo, y el historial no podía distinguir lo cronometrado de lo
+  recordado.
 
 ---
 
@@ -905,7 +932,7 @@ npm test
 ### Consideraciones post-deploy
 
 - Agregar el dominio de Vercel en Supabase: **Authentication → URL Configuration → Site URL** (necesario para los enlaces de recuperación de contraseña).
-- Ejecutar en el proyecto de producción **las ocho migraciones** en orden. Sin la 007 la paleta de comandos falla al llamar a `search_everything`.
+- Ejecutar en el proyecto de producción **las nueve migraciones** en orden. Sin la 007 la paleta de comandos falla al llamar a `search_everything`.
 - Verificar que las políticas RLS estén activas desde el dashboard de Supabase.
 - Actualizar la URL del servicio SOAP en `public/studyhub.wsdl` (elemento `<soap:address location="..."/>`), que apunta a `http://localhost:3000/api/soap`.
 

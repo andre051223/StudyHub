@@ -116,8 +116,8 @@ export default function ResetPasswordPage() {
 
           {linkState === 'invalid' && (
             <div className="text-center">
-              <div className="mx-auto w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
-                <ShieldAlert size={24} className="text-red-500" />
+              <div className="mx-auto w-12 h-12 rounded-full bg-red-500/10 dark:bg-red-500/20 flex items-center justify-center mb-4">
+                <ShieldAlert size={24} className="text-red-500 dark:text-red-400" />
               </div>
               <h1 className="text-2xl font-bold text-[var(--color-text)] mb-1">
                 Enlace inválido o expirado
@@ -171,7 +171,7 @@ export default function ResetPasswordPage() {
                     </button>
                   </div>
                   {errors.password && (
-                    <p className="mt-1 text-xs text-red-500">{errors.password.message}</p>
+                    <p className="mt-1 text-xs text-red-500 dark:text-red-400">{errors.password.message}</p>
                   )}
                 </div>
 
@@ -191,7 +191,7 @@ export default function ResetPasswordPage() {
                     {...register('confirmPassword')}
                   />
                   {errors.confirmPassword && (
-                    <p className="mt-1 text-xs text-red-500">
+                    <p className="mt-1 text-xs text-red-500 dark:text-red-400">
                       {errors.confirmPassword.message}
                     </p>
                   )}

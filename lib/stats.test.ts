@@ -12,6 +12,15 @@ import {
   currentStreak,
   dailyAverage,
   categoryTotals,
+  categoryBreakdown,
+  rangeStart,
+  comparePeriods,
+  hourBlocks,
+  bestHourBlock,
+  focusTotals,
+  heatmapWeeks,
+  heatmapWeekSpan,
+  heatmapLevel,
   summarize,
   formatMinutes,
   type StatsSession,
@@ -345,5 +354,269 @@ describe('formatMinutes', () => {
     expect(formatMinutes(60)).toBe('1h 0m');
     expect(formatMinutes(95)).toBe('1h 35m');
     expect(formatMinutes(605)).toBe('10h 5m');
+  });
+});
+
+describe('rangeStart', () => {
+  // Sábado 22 de agosto de 2026, 14:30 hora local.
+  const now = new Date(2026, 7, 22, 14, 30);
+
+  it('«día» arranca en la medianoche local de hoy', () => {
+    expect(rangeStart('day', now)).toEqual(new Date(2026, 7, 22, 0, 0, 0, 0));
+  });
+
+  it('«semana» arranca el lunes, no siete días atrás', () => {
+    expect(rangeStart('week', now)).toEqual(new Date(2026, 7, 17, 0, 0, 0, 0));
+  });
+
+  it('«mes» arranca el día 1, no treinta días atrás', () => {
+    expect(rangeStart('month', now)).toEqual(new Date(2026, 7, 1, 0, 0, 0, 0));
+  });
+});
+
+describe('categoryBreakdown', () => {
+  const calculo = { name: 'Cálculo', color: '#67b31f' };
+  const historia = { name: 'Historia', color: '#3b82f6' };
+
+  it('ordena de mayor a menor y reparte el porcentaje sobre el total del rango', () => {
+    const rows = categoryBreakdown([
+      session({ y: 2026, m: 8, d: 22 }, 30, { category: historia }),
+      session({ y: 2026, m: 8, d: 21 }, 50, { category: calculo }),
+      session({ y: 2026, m: 8, d: 20 }, 20, { category: calculo }),
+    ]);
+
+    expect(rows.map((r) => [r.name, r.minutes])).toEqual([
+      ['Cálculo', 70],
+      ['Historia', 30],
+    ]);
+    expect(rows.map((r) => Math.round(r.share))).toEqual([70, 30]);
+  });
+
+  it('agrupa el tiempo sin categoría en su propia fila, a diferencia de categoryTotals', () => {
+    const sessions = [
+      session({ y: 2026, m: 8, d: 22 }, 60, { category: calculo }),
+      session({ y: 2026, m: 8, d: 22 }, 40),
+    ];
+
+    expect(categoryTotals(sessions)).toHaveLength(1);
+
+    const rows = categoryBreakdown(sessions);
+    expect(rows.map((r) => [r.name, r.minutes])).toEqual([
+      ['Cálculo', 60],
+      ['Sin categoría', 40],
+    ]);
+    // Si el hueco se descartara, la columna sumaría 100 % de una cifra que no
+    // coincide con el tiempo realmente estudiado.
+    expect(rows.reduce((acc, r) => acc + r.share, 0)).toBeCloseTo(100);
+  });
+
+  it('respeta el filtro `from`', () => {
+    const rows = categoryBreakdown(
+      [
+        session({ y: 2026, m: 8, d: 22 }, 30, { category: calculo }),
+        session({ y: 2026, m: 7, d: 10 }, 90, { category: calculo }),
+      ],
+      new Date(2026, 7, 1)
+    );
+    expect(rows).toEqual([{ name: 'Cálculo', color: '#67b31f', minutes: 30, share: 100 }]);
+  });
+
+  it('calcula el porcentaje sobre segundos, no sobre los minutos ya redondeados', () => {
+    // 90 s y 30 s: en minutos redondeados serían 2 y 1 (67 %/33 %), pero el
+    // reparto real es 75 %/25 %.
+    const rows = categoryBreakdown([
+      session({ y: 2026, m: 8, d: 22 }, 1.5, { category: calculo }),
+      session({ y: 2026, m: 8, d: 22 }, 0.5, { category: historia }),
+    ]);
+    expect(rows.map((r) => Math.round(r.share))).toEqual([75, 25]);
+  });
+
+  it('descarta las filas que redondean a cero minutos', () => {
+    const rows = categoryBreakdown([
+      session({ y: 2026, m: 8, d: 22 }, 0.2, { category: calculo }),
+    ]);
+    expect(rows).toEqual([]);
+  });
+
+  it('sin sesiones en el rango devuelve una tabla vacía, no filas en cero', () => {
+    expect(categoryBreakdown([], new Date(2026, 7, 1))).toEqual([]);
+  });
+});
+
+describe('comparePeriods', () => {
+  // Miércoles 19 de agosto de 2026, 12:00. La semana en curso lleva dos días
+  // y medio; la anterior tuvo siete.
+  const now = new Date(2026, 7, 19, 12, 0);
+
+  it('recorta el periodo anterior al mismo avance, no lo compara entero', () => {
+    const sessions = [
+      // Semana en curso: lunes 17 y martes 18.
+      session({ y: 2026, m: 8, d: 17, h: 9 }, 60),
+      session({ y: 2026, m: 8, d: 18, h: 9 }, 60),
+      // Semana anterior: lunes 10 (dentro del tramo comparable) y sábado 15
+      // (fuera: la semana en curso todavía no ha llegado al sábado).
+      session({ y: 2026, m: 8, d: 10, h: 9 }, 30),
+      session({ y: 2026, m: 8, d: 15, h: 9 }, 600),
+    ];
+
+    const result = comparePeriods(sessions, 'week', now);
+    expect(result.current).toBe(120);
+    // Solo los 30 min del lunes: el sábado de la semana pasada queda fuera del
+    // tramo. Sin el recorte, el sábado hundiría la comparación un −80 %.
+    expect(result.previous).toBe(30);
+    expect(Math.round(result.deltaPct!)).toBe(300);
+  });
+
+  it('deja el porcentaje en null si el periodo anterior estuvo en cero', () => {
+    const result = comparePeriods([session({ y: 2026, m: 8, d: 19, h: 9 }, 45)], 'day', now);
+    expect(result.current).toBe(45);
+    expect(result.previous).toBe(0);
+    expect(result.deltaPct).toBeNull();
+  });
+
+  it('el mes anterior no se solapa con el actual aunque sea más corto', () => {
+    // 2 de marzo: el tramo comparable de febrero acabaría el 2 de marzo si no
+    // se topara en el inicio del mes actual.
+    const marchSecond = new Date(2026, 2, 2, 12, 0);
+    const sessions = [
+      session({ y: 2026, m: 3, d: 1, h: 9 }, 20),
+      session({ y: 2026, m: 2, d: 1, h: 9 }, 50),
+    ];
+    const result = comparePeriods(sessions, 'month', marchSecond);
+    expect(result.current).toBe(20);
+    expect(result.previous).toBe(50);
+  });
+});
+
+describe('hourBlocks / bestHourBlock', () => {
+  const evening = (d: number, minutes: number) =>
+    session({ y: 2026, m: 8, d, h: 19, min: 30 }, minutes);
+
+  it('agrupa por la hora local de inicio en bloques de 3 h', () => {
+    const blocks = hourBlocks([evening(10, 60), session({ y: 2026, m: 8, d: 11, h: 7 }, 30)]);
+    expect(blocks).toHaveLength(8);
+    expect(blocks.find((b) => b.startHour === 18)).toMatchObject({
+      label: '18:00–21:00',
+      minutes: 60,
+    });
+    expect(blocks.find((b) => b.startHour === 6)?.minutes).toBe(30);
+  });
+
+  it('no proclama una franja favorita con muy pocas sesiones', () => {
+    expect(bestHourBlock([evening(10, 60), evening(11, 60)])).toBeNull();
+  });
+
+  it('con suficientes sesiones devuelve el bloque de más tiempo', () => {
+    const sessions = [
+      evening(10, 60),
+      evening(11, 60),
+      evening(12, 60),
+      evening(13, 60),
+      session({ y: 2026, m: 8, d: 14, h: 7 }, 30),
+    ];
+    expect(bestHourBlock(sessions)?.startHour).toBe(18);
+  });
+});
+
+describe('focusTotals', () => {
+  const rated = (d: number, minutes: number, rating: 'focused' | 'ok' | 'distracted') => ({
+    ...session({ y: 2026, m: 8, d }, minutes),
+    focus_rating: rating,
+  });
+
+  it('reparte sobre el tiempo calificado e ignora el resto', () => {
+    const { totals, ratedMinutes, ratedSessions } = focusTotals([
+      rated(10, 60, 'focused'),
+      rated(11, 20, 'distracted'),
+      // Sin calificar: no entra en el reparto. Si contara, cualquier
+      // porcentaje se iría hacia «sin datos», que es casi todo el histórico.
+      session({ y: 2026, m: 8, d: 12 }, 300),
+    ]);
+
+    expect(ratedSessions).toBe(2);
+    expect(ratedMinutes).toBe(80);
+    expect(totals.map((t) => [t.rating, t.minutes, Math.round(t.share)])).toEqual([
+      ['focused', 60, 75],
+      ['ok', 0, 0],
+      ['distracted', 20, 25],
+    ]);
+  });
+
+  it('sin nada calificado devuelve las tres filas en cero', () => {
+    const { totals, ratedSessions } = focusTotals([session({ y: 2026, m: 8, d: 10 }, 60)]);
+    expect(ratedSessions).toBe(0);
+    expect(totals.every((t) => t.minutes === 0 && t.share === 0)).toBe(true);
+  });
+});
+
+describe('heatmapWeeks / heatmapLevel', () => {
+  // Miércoles 19 de agosto de 2026.
+  const now = new Date(2026, 7, 19, 12, 0);
+
+  it('devuelve semanas completas de lunes a domingo', () => {
+    const weeks = heatmapWeeks([], 4, now);
+    expect(weeks).toHaveLength(4);
+    expect(weeks.every((w) => w.length === 7)).toBe(true);
+    // La última columna es la semana en curso, que empieza el lunes 17.
+    expect(weeks[3][0].key).toBe('2026-08-17');
+    expect(weeks[3][6].key).toBe('2026-08-23');
+  });
+
+  it('marca como futuros los días de esta semana que aún no han llegado', () => {
+    const weeks = heatmapWeeks([], 2, now);
+    const thisWeek = weeks[1];
+    // Lunes a miércoles ya pasaron; de jueves en adelante, no.
+    expect(thisWeek.slice(0, 3).some((d) => d.isFuture)).toBe(false);
+    expect(thisWeek.slice(3).every((d) => d.isFuture)).toBe(true);
+  });
+
+  it('agrupa los minutos por día local, no por día UTC', () => {
+    // 19:30 en UTC−5 son las 00:30 UTC del día siguiente.
+    const weeks = heatmapWeeks([session({ y: 2026, m: 8, d: 18, h: 19, min: 30 }, 45)], 2, now);
+    const day = weeks.flat().find((d) => d.key === '2026-08-18');
+    expect(day?.minutes).toBe(45);
+  });
+
+  it('reparte la intensidad en cuartiles del máximo del periodo', () => {
+    expect(heatmapLevel(0, 100)).toBe(0);
+    expect(heatmapLevel(1, 100)).toBe(1);
+    expect(heatmapLevel(25, 100)).toBe(1);
+    expect(heatmapLevel(50, 100)).toBe(2);
+    expect(heatmapLevel(75, 100)).toBe(3);
+    expect(heatmapLevel(100, 100)).toBe(4);
+  });
+
+  it('sin máximo no enciende ninguna celda', () => {
+    expect(heatmapLevel(0, 0)).toBe(0);
+  });
+});
+
+describe('heatmapWeekSpan', () => {
+  // Domingo 23 de agosto de 2026; el lunes de su semana es el 17.
+  const now = new Date(2026, 7, 23, 12, 0);
+
+  it('arranca en la semana de la primera sesión, no un año atrás', () => {
+    // Primera sesión: miércoles 8 de julio de 2026 → lunes 6 de julio.
+    // Del 6 de julio al 17 de agosto hay 6 semanas de diferencia; con la
+    // actual incluida, 7 columnas.
+    const span = heatmapWeekSpan([session({ y: 2026, m: 7, d: 8 }, 30)], now);
+    expect(span).toBe(7);
+
+    const weeks = heatmapWeeks([], span, now);
+    expect(weeks[0][0].key).toBe('2026-07-06');
+    expect(weeks[span - 1][0].key).toBe('2026-08-17');
+  });
+
+  it('no pasa del techo aunque el historial sea más antiguo', () => {
+    const span = heatmapWeekSpan([session({ y: 2020, m: 1, d: 6 }, 30)], now, 53);
+    expect(span).toBe(53);
+  });
+
+  it('una sola sesión de esta semana da una única columna', () => {
+    expect(heatmapWeekSpan([session({ y: 2026, m: 8, d: 19 }, 30)], now)).toBe(1);
+  });
+
+  it('sin sesiones no calcula un rango vacío negativo', () => {
+    expect(heatmapWeekSpan([], now)).toBe(1);
   });
 });

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowRight, CalendarClock, CheckCircle2 } from 'lucide-react';
 import type { Task } from '@/lib/types';
 import { deadlineStatus, formatDeadline } from '@/lib/deadlines';
+import { useLocalToday } from '@/hooks/useLocalToday';
 
 interface Props {
   /** Tareas pendientes con fecha límite, ya acotadas por la consulta. */
@@ -21,18 +22,26 @@ interface Props {
  * El filtro final se hace aquí y no en la consulta porque «hoy» depende de la
  * zona horaria del usuario, que el servidor no conoce: la consulta acota con
  * margen de un día y el navegador decide. Ver `lib/deadlines.ts`.
+ *
+ * «El navegador decide» exige esperar a que lo haya: un componente de cliente
+ * también se renderiza en el servidor, así que el día tiene que venir de
+ * `useLocalToday()`. Con `new Date()` a secas, en UTC la lista anunciaba como
+ * vencido un plazo que todavía era de hoy, y React descartaba el árbol por
+ * desajuste de hidratación.
  */
 export function DueToday({ tasks }: Props) {
-  const due = useMemo(
-    () =>
-      tasks
-        .map((task) => ({ task, status: deadlineStatus(task.deadline!) }))
-        .filter(({ status }) => status === 'overdue' || status === 'today')
-        .sort((a, b) => a.task.deadline!.localeCompare(b.task.deadline!)),
-    [tasks]
-  );
+  const todayMs = useLocalToday();
 
-  const overdueCount = due.filter((d) => d.status === 'overdue').length;
+  const due = useMemo(() => {
+    if (todayMs === null) return null;
+    const now = new Date(todayMs);
+    return tasks
+      .map((task) => ({ task, status: deadlineStatus(task.deadline!, now) }))
+      .filter(({ status }) => status === 'overdue' || status === 'today')
+      .sort((a, b) => a.task.deadline!.localeCompare(b.task.deadline!));
+  }, [tasks, todayMs]);
+
+  const overdueCount = due?.filter((d) => d.status === 'overdue').length ?? 0;
 
   return (
     <section className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-card)] overflow-hidden">
@@ -54,7 +63,9 @@ export function DueToday({ tasks }: Props) {
         </Link>
       </header>
 
-      {due.length === 0 ? (
+      {due === null ? (
+        <div className="px-5 py-10" aria-busy="true" />
+      ) : due.length === 0 ? (
         <div className="px-5 py-10 text-center">
           <CheckCircle2 size={22} className="mx-auto mb-2 text-[var(--color-gray-mid)]" />
           <p className="text-sm text-[var(--color-text)]">Nada vence hoy.</p>
@@ -85,7 +96,7 @@ export function DueToday({ tasks }: Props) {
                       : 'text-amber-600 dark:text-amber-400'
                   }`}
                 >
-                  {formatDeadline(task.deadline!)}
+                  {formatDeadline(task.deadline!, new Date(todayMs!))}
                 </span>
               </Link>
             </li>

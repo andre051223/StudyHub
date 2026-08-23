@@ -80,7 +80,7 @@ export default function LoginPage() {
                 {...register('email')}
               />
               {errors.email && (
-                <p className="mt-1 text-xs text-red-500">{errors.email.message}</p>
+                <p className="mt-1 text-xs text-red-500 dark:text-red-400">{errors.email.message}</p>
               )}
             </div>
 
@@ -118,7 +118,7 @@ export default function LoginPage() {
                 </button>
               </div>
               {errors.password && (
-                <p className="mt-1 text-xs text-red-500">{errors.password.message}</p>
+                <p className="mt-1 text-xs text-red-500 dark:text-red-400">{errors.password.message}</p>
               )}
             </div>
 

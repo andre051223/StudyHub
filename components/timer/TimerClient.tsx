@@ -2,17 +2,27 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom/client';
-import { Play, Pause, Square, PictureInPicture2 } from 'lucide-react';
+import { Play, Pause, Square, PictureInPicture2, Target, X } from 'lucide-react';
 import { MiniTimer } from './MiniTimer';
 import { toast } from 'sonner';
-import { createSessionAction } from '@/app/(app)/timer/actions';
-import type { Category, StudySession, StudyMode, TimerState, TaskQuadrant } from '@/lib/types';
-import type { StatsSession } from '@/lib/stats';
+import { createSessionAction, updateSessionAction } from '@/app/(app)/timer/actions';
+import type {
+  Category,
+  OpenTask,
+  PomodoroSettings,
+  StudySession,
+  StudyMode,
+  TimerState,
+  TaskQuadrant,
+} from '@/lib/types';
+import { formatMinutes, type FocusRatingKey, type StatsSession } from '@/lib/stats';
 import { MIN_TIMER_MINUTES, MAX_TIMER_MINUTES } from '@/lib/models/SessionModel';
 import { formatDuration, getCircumference } from '@/lib/utils';
 import { SessionHistory } from './SessionHistory';
+import { SessionForm } from './SessionForm';
 import { StudyStats } from './StudyStats';
 import { StudyGoals } from './StudyGoals';
+import { FocusRatingPicker } from './focusRating';
 
 const STORAGE_KEY = 'studyhub_timer_state';
 // Rango del selector de duración del temporizador (en minutos). Vive en el
@@ -20,13 +30,8 @@ const STORAGE_KEY = 'studyhub_timer_state';
 const MIN_DURATION = MIN_TIMER_MINUTES;
 const MAX_DURATION = MAX_TIMER_MINUTES;
 
-/** Lo mínimo que necesita el selector de tareas del temporizador. */
-export interface OpenTask {
-  id: string;
-  title: string;
-  quadrant: TaskQuadrant;
-  category_id: string | null;
-}
+/** Sesión del historial: la fila completa más la categoría incrustada. */
+type HistorySession = StudySession & { category?: { name: string; color: string } | null };
 
 /** Orden y etiquetas de los grupos del selector, de más a menos urgente. */
 const TASK_GROUPS: { quadrant: TaskQuadrant; label: string }[] = [
@@ -35,6 +40,12 @@ const TASK_GROUPS: { quadrant: TaskQuadrant; label: string }[] = [
   { quadrant: 'urgent_not_important', label: 'Delegar' },
   { quadrant: 'not_urgent_not_important', label: 'Eliminar' },
 ];
+
+const MODE_LABELS: Record<'simple' | 'stopwatch' | 'pomodoro', string> = {
+  simple: 'Temporizador',
+  stopwatch: 'Cronómetro',
+  pomodoro: 'Pomodoro',
+};
 
 const defaultState: TimerState = {
   isRunning: false,
@@ -47,18 +58,50 @@ const defaultState: TimerState = {
   pausedAt: null,
   totalPausedMs: 0,
   sessionId: null,
+  phase: 'focus',
+  cyclesDone: 0,
 };
+
+/**
+ * Minutos que dura el tramo en curso.
+ *
+ * En Pomodoro la duración no la fija el usuario en un slider sino la fase, así
+ * que `durationMinutes` deja de ser la fuente de verdad y todo el reloj
+ * —cuenta atrás, anillo y guardado— tiene que preguntar por aquí.
+ */
+function phaseMinutes(s: TimerState, p: PomodoroSettings): number {
+  if (s.mode !== 'pomodoro') return s.durationMinutes;
+  if (s.phase === 'focus') return p.focusMinutes;
+  return s.phase === 'long_break' ? p.longBreakMinutes : p.breakMinutes;
+}
+
+/** Proyección de una sesión completa a la forma mínima de las estadísticas. */
+function toStatsSession(s: StudySession): StatsSession {
+  return {
+    id: s.id,
+    started_at: s.started_at,
+    actual_duration_seconds: s.actual_duration_seconds,
+    completed_at: s.completed_at,
+    category_id: s.category_id,
+    category: s.category ? { name: s.category.name, color: s.category.color } : null,
+    focus_rating: s.focus_rating,
+  };
+}
+
+const byStartedAtDesc = (a: { started_at: string }, b: { started_at: string }) =>
+  new Date(b.started_at).getTime() - new Date(a.started_at).getTime();
 
 interface Props {
   categories: Category[];
   /** Historial completo, acotado a las 50 más recientes. */
-  initialSessions: (StudySession & { category?: { name: string; color: string } | null })[];
+  initialSessions: HistorySession[];
   /** Sesiones completadas del último año, con las columnas mínimas para las estadísticas. */
   initialStatsSessions: StatsSession[];
   /** Tareas pendientes, para poder estudiar sobre una en concreto. */
   openTasks: OpenTask[];
   dailyGoal: number;
   weeklyGoal: number;
+  pomodoro: PomodoroSettings;
 }
 
 export function TimerClient({
@@ -68,6 +111,7 @@ export function TimerClient({
   openTasks,
   dailyGoal,
   weeklyGoal,
+  pomodoro: initialPomodoro,
 }: Props) {
   const [state, setState] = useState<TimerState>(defaultState);
   const [secondsLeft, setSecondsLeft] = useState(defaultState.durationMinutes * 60);
@@ -76,6 +120,11 @@ export function TimerClient({
   // Se mantiene aparte del historial para que las estadísticas sigan cubriendo
   // el año completo y a la vez se actualicen al guardar una sesión nueva.
   const [statsSessions, setStatsSessions] = useState(initialStatsSessions);
+  const [pomodoro, setPomodoro] = useState(initialPomodoro);
+  // Sesión recién completada, a la espera de que el usuario diga cómo le fue.
+  const [pendingRating, setPendingRating] = useState<StudySession | null>(null);
+  // `undefined` = formulario cerrado; `null` = alta manual; objeto = edición.
+  const [editing, setEditing] = useState<StudySession | null | undefined>(undefined);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const savingRef = useRef(false);
@@ -85,6 +134,12 @@ export function TimerClient({
 
   // Keep stateRef in sync so async callbacks always see latest state
   useEffect(() => { stateRef.current = state; });
+
+  // Misma técnica para los ajustes del Pomodoro: los cambia la pestaña de
+  // metas mientras el reloj puede estar corriendo, y los callbacks asíncronos
+  // del ciclo tienen que ver siempre el último valor.
+  const pomodoroRef = useRef(pomodoro);
+  useEffect(() => { pomodoroRef.current = pomodoro; });
 
   // Misma técnica para la lista de tareas: el effect de hidratación necesita
   // consultarla, pero no debe volver a ejecutarse si cambia (rehidratar desde
@@ -101,8 +156,9 @@ export function TimerClient({
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as TimerState;
-        // Estados guardados antes de retirar el modo Pomodoro.
-        if ((parsed.mode as string) === 'pomodoro') parsed.mode = 'simple';
+        // Estados guardados antes de que el Pomodoro tuviera fases propias.
+        parsed.phase = parsed.phase ?? 'focus';
+        parsed.cyclesDone = parsed.cyclesDone ?? 0;
         // Estados guardados antes de que existiera la tarea asociada, y
         // tareas que ya no están pendientes: la referencia se descarta en vez
         // de guardar una sesión apuntando a algo que ya no existe.
@@ -129,11 +185,12 @@ export function TimerClient({
     return Math.max(0, Math.floor((now - s.startedAt! - s.totalPausedMs) / 1000));
   }, []);
 
-  // Compute seconds left from timestamps (countdown mode only)
+  // Compute seconds left from timestamps (countdown modes only)
   const computeSecondsLeft = useCallback(
     (s: TimerState): number => {
-      if (!s.isRunning && !s.isPaused) return s.durationMinutes * 60;
-      return Math.max(0, s.durationMinutes * 60 - computeElapsedSeconds(s));
+      const total = phaseMinutes(s, pomodoroRef.current) * 60;
+      if (!s.isRunning && !s.isPaused) return total;
+      return Math.max(0, total - computeElapsedSeconds(s));
     },
     [computeElapsedSeconds]
   );
@@ -145,10 +202,19 @@ export function TimerClient({
   const handleCompleteRef = useRef(handleComplete);
   useEffect(() => { handleCompleteRef.current = handleComplete; });
 
-  // Etiqueta del modo. Declarada aquí arriba porque el effect de la ventana
-  // flotante la lista entre sus dependencias, y un `const` posterior estaría
-  // en zona muerta temporal al evaluarse el array.
-  const phaseLabel = state.mode === 'stopwatch' ? 'Cronómetro' : 'Temporizador';
+  // Etiqueta del tramo en curso. Declarada aquí arriba porque el effect de la
+  // ventana flotante la lista entre sus dependencias, y un `const` posterior
+  // estaría en zona muerta temporal al evaluarse el array.
+  const phaseLabel =
+    state.mode === 'stopwatch'
+      ? 'Cronómetro'
+      : state.mode === 'pomodoro'
+      ? state.phase === 'focus'
+        ? `Foco · bloque ${state.cyclesDone + 1}`
+        : state.phase === 'long_break'
+        ? 'Descanso largo'
+        : 'Descanso'
+      : 'Temporizador';
 
   // Tick. `secondsLeft` holds the value shown on screen: remaining seconds for
   // the countdown, elapsed seconds for the stopwatch.
@@ -178,6 +244,8 @@ export function TimerClient({
     state.startedAt,
     state.durationMinutes,
     state.mode,
+    state.phase,
+    pomodoro,
     computeElapsedSeconds,
     computeSecondsLeft,
   ]);
@@ -293,11 +361,64 @@ export function TimerClient({
     }
   }
 
+  // ── Reconciliación de las dos listas ────────────────────────
+  //
+  // El historial y las estadísticas se mantienen por separado (50 filas
+  // completas frente a un año de filas mínimas), así que toda escritura tiene
+  // que aplicarse a ambas. Se ordena por fecha porque una sesión registrada a
+  // mano puede ser de la semana pasada y no debe colarse arriba del todo.
+
+  function applySavedSession(saved: StudySession) {
+    setSessions((prev) => {
+      const next = prev.some((s) => s.id === saved.id)
+        ? prev.map((s) => (s.id === saved.id ? (saved as HistorySession) : s))
+        : [saved as HistorySession, ...prev];
+      return [...next].sort(byStartedAtDesc);
+    });
+
+    setStatsSessions((prev) => {
+      // Solo las completadas alimentan las estadísticas; si una sesión deja de
+      // estarlo al editarla, tiene que desaparecer de ellas.
+      const without = prev.filter((s) => s.id !== saved.id);
+      if (!saved.completed_at) return without;
+      return [toStatsSession(saved), ...without].sort(byStartedAtDesc);
+    });
+  }
+
+  function removeSession(id: string) {
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    setStatsSessions((prev) => prev.filter((s) => s.id !== id));
+    setPendingRating((prev) => (prev?.id === id ? null : prev));
+  }
+
+  async function handleRate(rating: FocusRatingKey | null) {
+    const session = pendingRating;
+    if (!session || !rating) {
+      setPendingRating(null);
+      return;
+    }
+    setPendingRating(null);
+
+    const result = await updateSessionAction(session.id, { focus_rating: rating });
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+    applySavedSession(result.data);
+  }
+
+  // ── Ciclo del reloj ─────────────────────────────────────────
+
   async function handleComplete() {
     const s = stateRef.current;
+    if (s.mode === 'pomodoro') {
+      await handlePomodoroPhaseEnd();
+      return;
+    }
+
     playBell();
     sendBrowserNotification('¡Sesión completada! Tiempo de descansar.');
-    await saveSession(true);
+    const saved = await saveSession(true);
     setState({
       ...defaultState,
       mode: s.mode,
@@ -306,21 +427,72 @@ export function TimerClient({
       taskId: s.taskId,
     });
     toast.success('¡Sesión completada!');
+    if (saved) setPendingRating(saved);
   }
 
-  async function saveSession(completed: boolean) {
+  /**
+   * Fin de una fase del Pomodoro.
+   *
+   * Cada bloque de foco se guarda como su propia sesión: es tiempo realmente
+   * estudiado y tiene que contar aunque la tanda se abandone a la mitad. Los
+   * descansos no se guardan —no son estudio— y por eso tampoco preguntan qué
+   * tal fueron. La siguiente fase arranca sola, que es lo que distingue al
+   * Pomodoro de encadenar temporizadores a mano.
+   */
+  async function handlePomodoroPhaseEnd() {
     const s = stateRef.current;
+    playBell();
+
+    if (s.phase !== 'focus') {
+      sendBrowserNotification('Fin del descanso. A por el siguiente bloque.');
+      setState({
+        ...s,
+        phase: 'focus',
+        isRunning: true,
+        isPaused: false,
+        startedAt: Date.now(),
+        pausedAt: null,
+        totalPausedMs: 0,
+      });
+      toast.info('Fin del descanso');
+      return;
+    }
+
+    const saved = await saveSession(true);
+    const cyclesDone = s.cyclesDone + 1;
+    const longBreak = cyclesDone % pomodoroRef.current.cyclesBeforeLongBreak === 0;
+
+    sendBrowserNotification(
+      longBreak ? '¡Tanda completada! Te has ganado un descanso largo.' : 'Bloque completado. Descansa un poco.'
+    );
+    setState({
+      ...s,
+      phase: longBreak ? 'long_break' : 'break',
+      cyclesDone,
+      isRunning: true,
+      isPaused: false,
+      startedAt: Date.now(),
+      pausedAt: null,
+      totalPausedMs: 0,
+    });
+    toast.success(longBreak ? '¡Tanda completada!' : `Bloque ${cyclesDone} completado`);
+    // Se pregunta durante el descanso, que es justo cuando hay tiempo.
+    if (saved) setPendingRating(saved);
+  }
+
+  async function saveSession(completed: boolean): Promise<StudySession | null> {
+    const s = stateRef.current;
+    const isCountdown = s.mode !== 'stopwatch';
+    const planned = phaseMinutes(s, pomodoroRef.current);
     // Tiempo realmente estudiado. En el cronómetro no hay duración planeada,
     // así que se usa el tiempo transcurrido directamente.
     const actual = Math.max(
       0,
-      s.mode === 'stopwatch'
-        ? computeElapsedSeconds(s)
-        : s.durationMinutes * 60 - computeSecondsLeft(s)
+      isCountdown ? planned * 60 - computeSecondsLeft(s) : computeElapsedSeconds(s)
     );
-    // Por Server Action: SessionModel valida el rango según el modo (10–120
-    // solo para el temporizador, sin techo para el cronómetro) y que el tiempo
-    // transcurrido no sea negativo. Insertando directo nada de eso corría.
+    // Por Server Action: SessionModel valida el rango de la duración planeada
+    // según el modo y que el tiempo transcurrido no sea negativo ni absurdo.
+    // Insertando directo nada de eso corría.
     const result = await createSessionAction({
       category_id: s.categoryId,
       task_id: s.taskId,
@@ -328,25 +500,24 @@ export function TimerClient({
       // escribía Math.round(actual / 60), que rompía el CHECK de la base
       // tanto por arriba (más de 2 h) como por abajo (menos de 30 s → 0), y
       // la sesión se perdía con un toast de error.
-      duration_minutes: s.mode === 'stopwatch' ? null : s.durationMinutes,
+      duration_minutes: isCountdown ? planned : null,
       actual_duration_seconds: actual,
       mode: s.mode,
-      pomodoro_cycles_completed: 0,
+      // El bloque en curso solo suma si llegó al final: detener a la mitad
+      // guarda el tiempo estudiado, no un pomodoro completado.
+      pomodoro_cycles_completed:
+        s.mode === 'pomodoro' ? s.cyclesDone + (completed ? 1 : 0) : 0,
       started_at: new Date(s.startedAt!).toISOString(),
       completed_at: completed ? new Date().toISOString() : null,
     });
 
     if (!result.ok) {
       toast.error(result.error);
-      return;
+      return null;
     }
 
-    const saved = result.data as typeof sessions[0];
-    setSessions((prev) => [saved, ...prev]);
-    // Solo las completadas alimentan las estadísticas.
-    if (saved.completed_at) {
-      setStatsSessions((prev) => [saved as StatsSession, ...prev]);
-    }
+    applySavedSession(result.data);
+    return result.data;
   }
 
   async function handleStart() {
@@ -375,7 +546,10 @@ export function TimerClient({
 
   async function handleStop() {
     const s = stateRef.current;
-    if (s.startedAt) await saveSession(false);
+    // Detener durante un descanso no guarda nada: un descanso no es estudio, y
+    // registrarlo inflaría el tiempo del día con minutos que nadie estudió.
+    const isBreak = s.mode === 'pomodoro' && s.phase !== 'focus';
+    if (s.startedAt && !isBreak) await saveSession(false);
     setState({
       ...defaultState,
       mode: s.mode,
@@ -386,22 +560,35 @@ export function TimerClient({
     toast.info('Sesión detenida');
   }
 
+  function handleModeChange(mode: StudyMode) {
+    if (state.isRunning) return;
+    // Cambiar de modo reinicia la tanda: los bloques completados pertenecen al
+    // ciclo que se abandona.
+    setState((prev) => ({ ...prev, mode, phase: 'focus', cyclesDone: 0 }));
+  }
+
   const isStopwatch = state.mode === 'stopwatch';
-  const totalDuration = state.durationMinutes * 60;
+  const isPomodoro = state.mode === 'pomodoro';
+  const isRest = isPomodoro && state.phase !== 'focus';
+  const totalDuration = phaseMinutes(state, pomodoro) * 60;
+  const idle = !state.isRunning && !state.isPaused;
   const displaySeconds = isStopwatch
     ? secondsLeft // tiempo transcurrido
-    : (!state.isRunning && !state.isPaused)
+    : idle
     ? totalDuration
     : secondsLeft;
   // Relleno del anillo:
   // - Cronómetro: sin meta fija, el anillo se muestra completo.
   // - Temporizador en reposo: refleja la duración elegida con el slider
   //   (proporción sobre el máximo de 120 min).
-  // - Temporizador en marcha: avance de la sesión.
+  // - Pomodoro en reposo: vacío, porque la fase aún no ha empezado.
+  // - En marcha: avance del tramo.
   const progress = isStopwatch
     ? 1
-    : !state.isRunning && !state.isPaused
-    ? state.durationMinutes / MAX_DURATION
+    : idle
+    ? isPomodoro
+      ? 0
+      : state.durationMinutes / MAX_DURATION
     : totalDuration > 0
     ? (totalDuration - displaySeconds) / totalDuration
     : 0;
@@ -409,6 +596,20 @@ export function TimerClient({
   const circumference = getCircumference(radius);
   const strokeDashoffset = circumference * (1 - progress);
 
+  // Contraste entre lo estimado y lo llevado en la tarea elegida (migración
+  // 009). Se suma el tiempo del tramo en curso —sin contar descansos— para
+  // que el aviso llegue mientras aún se puede reaccionar, y no al día
+  // siguiente al abrir el Kanban.
+  const selectedTask = openTasks.find((t) => t.id === state.taskId) ?? null;
+  const liveSeconds = idle || isRest ? 0 : isStopwatch ? secondsLeft : totalDuration - secondsLeft;
+  const taskProgress =
+    selectedTask?.estimated_minutes != null
+      ? (() => {
+          const done = Math.round((selectedTask.studied_seconds + Math.max(0, liveSeconds)) / 60);
+          const estimate = selectedTask.estimated_minutes!;
+          return { done, estimate, pct: Math.round((done / estimate) * 100) };
+        })()
+      : null;
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8">
@@ -432,7 +633,9 @@ export function TimerClient({
                   cy="110"
                   r={radius}
                   fill="none"
-                  stroke="var(--color-primary)"
+                  // Los descansos se pintan en gris: el verde de marca señala
+                  // el tiempo que cuenta como estudio.
+                  stroke={isRest ? 'var(--color-gray-mid)' : 'var(--color-primary)'}
                   strokeWidth="10"
                   strokeLinecap="round"
                   strokeDasharray={circumference}
@@ -447,6 +650,27 @@ export function TimerClient({
                 <span className="text-sm text-[var(--color-text-soft)] mt-1">{phaseLabel}</span>
               </div>
             </div>
+
+            {/* Bloques completados en la tanda actual. */}
+            {isPomodoro && (
+              <div
+                className="flex items-center gap-1.5"
+                aria-label={`${state.cyclesDone} de ${pomodoro.cyclesBeforeLongBreak} bloques completados`}
+              >
+                {Array.from({ length: pomodoro.cyclesBeforeLongBreak }, (_, i) => (
+                  <span
+                    key={i}
+                    aria-hidden
+                    className={`w-2 h-2 rounded-full transition-colors ${
+                      i < state.cyclesDone % pomodoro.cyclesBeforeLongBreak ||
+                      (state.cyclesDone > 0 && state.cyclesDone % pomodoro.cyclesBeforeLongBreak === 0)
+                        ? 'bg-[var(--color-primary)]'
+                        : 'bg-[var(--color-gray-border)]'
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
 
             {/* Controls */}
             <div className="flex items-center gap-3">
@@ -506,18 +730,18 @@ export function TimerClient({
                 Modo
               </label>
               <div className="flex rounded-xl border border-[var(--color-gray-border)] overflow-hidden w-fit">
-                {(['simple', 'stopwatch'] as StudyMode[]).map((m) => (
+                {(['simple', 'stopwatch', 'pomodoro'] as const).map((m) => (
                   <button
                     key={m}
-                    onClick={() => !state.isRunning && setState((prev) => ({ ...prev, mode: m }))}
+                    onClick={() => handleModeChange(m)}
                     disabled={state.isRunning}
-                    className={`px-5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed ${
+                    className={`px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed ${
                       state.mode === m
                         ? 'bg-[var(--color-primary)] text-white'
                         : 'text-[var(--color-text-soft)] hover:bg-[var(--color-gray-light)]'
                     }`}
                   >
-                    {m === 'simple' ? 'Temporizador' : 'Cronómetro'}
+                    {MODE_LABELS[m]}
                   </button>
                 ))}
               </div>
@@ -553,6 +777,23 @@ export function TimerClient({
                 <p className="font-medium text-[var(--color-text)] mb-1">Cronómetro</p>
                 <p>Cuenta el tiempo hacia arriba, sin límite.</p>
                 <p>Pulsa &quot;Detener&quot; para guardar la sesión.</p>
+              </div>
+            )}
+
+            {isPomodoro && (
+              <div className="bg-[var(--color-gray-light)] rounded-xl p-4 text-sm text-[var(--color-text-soft)]">
+                <p className="font-medium text-[var(--color-text)] mb-1">Pomodoro</p>
+                <p>
+                  {pomodoro.focusMinutes} min de foco y {pomodoro.breakMinutes} de descanso;
+                  cada {pomodoro.cyclesBeforeLongBreak} bloques, {pomodoro.longBreakMinutes} min
+                  largos. Las fases se encadenan solas.
+                </p>
+                <button
+                  onClick={() => setActiveTab('goals')}
+                  className="mt-1.5 text-[var(--color-primary)] hover:underline"
+                >
+                  Ajustar duraciones
+                </button>
               </div>
             )}
 
@@ -596,6 +837,44 @@ export function TimerClient({
                   );
                 })}
               </select>
+
+              {taskProgress && (
+                <div className="mt-2">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="flex items-center gap-1.5 text-[var(--color-text-soft)]">
+                      <Target size={12} className="text-[var(--color-primary)]" />
+                      {formatMinutes(taskProgress.done)} de {formatMinutes(taskProgress.estimate)}{' '}
+                      estimados
+                    </span>
+                    <span
+                      className={`tabular-nums font-medium ${
+                        taskProgress.pct > 100
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-[var(--color-text-soft)]'
+                      }`}
+                    >
+                      {taskProgress.pct}%
+                    </span>
+                  </div>
+                  <div className="mt-1 h-1.5 rounded-full bg-[var(--color-gray-border)] overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${Math.min(100, taskProgress.pct)}%`,
+                        background:
+                          taskProgress.pct > 100 ? '#f59e0b' : 'var(--color-primary)',
+                      }}
+                    />
+                  </div>
+                  {taskProgress.pct > 100 && (
+                    <p className="text-meta mt-1 text-amber-600 dark:text-amber-400">
+                      Llevas {formatMinutes(taskProgress.done - taskProgress.estimate)} más de lo
+                      estimado.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {openTasks.length === 0 && (
                 <p className="text-meta mt-1.5">
                   Cuando tengas tareas pendientes podrás estudiar sobre una y ver
@@ -629,6 +908,27 @@ export function TimerClient({
         </div>
       </div>
 
+      {/* ¿Cómo fue? Se pregunta una vez, al terminar, y se puede omitir: una
+          calificación forzada es una calificación falsa. */}
+      {pendingRating && (
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-[var(--color-surface)] rounded-2xl p-4 shadow-[var(--shadow-card)] mb-6">
+          <p className="text-sm font-medium text-[var(--color-text)] flex-shrink-0">
+            ¿Cómo te fue en esta sesión?
+          </p>
+          <div className="flex-1">
+            <FocusRatingPicker value={null} onChange={handleRate} clearable={false} />
+          </div>
+          <button
+            onClick={() => setPendingRating(null)}
+            aria-label="Omitir la calificación"
+            className="flex items-center gap-1 px-2 py-1 text-sm text-[var(--color-text-soft)] hover:text-[var(--color-text)] transition-colors flex-shrink-0"
+          >
+            <X size={14} />
+            Omitir
+          </button>
+        </div>
+      )}
+
       {/* History / Stats */}
       <div className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-card)] overflow-hidden">
         <div className="flex border-b border-[var(--color-gray-border)]">
@@ -642,21 +942,42 @@ export function TimerClient({
                   : 'text-[var(--color-text-soft)] hover:text-[var(--color-text)]'
               }`}
             >
-              {tab === 'history' ? 'Historial' : tab === 'stats' ? 'Estadísticas' : 'Rachas'}
+              {tab === 'history' ? 'Historial' : tab === 'stats' ? 'Estadísticas' : 'Metas'}
             </button>
           ))}
         </div>
 
         <div className="p-6">
           {activeTab === 'history' ? (
-            <SessionHistory sessions={sessions} />
+            <SessionHistory
+              sessions={sessions}
+              onCreate={() => setEditing(null)}
+              onEdit={(session) => setEditing(session)}
+            />
           ) : activeTab === 'stats' ? (
             <StudyStats sessions={statsSessions} />
           ) : (
-            <StudyGoals sessions={statsSessions} dailyGoal={dailyGoal} weeklyGoal={weeklyGoal} />
+            <StudyGoals
+              sessions={statsSessions}
+              dailyGoal={dailyGoal}
+              weeklyGoal={weeklyGoal}
+              pomodoro={pomodoro}
+              onPomodoroChange={setPomodoro}
+            />
           )}
         </div>
       </div>
+
+      {editing !== undefined && (
+        <SessionForm
+          session={editing}
+          categories={categories}
+          tasks={openTasks}
+          onClose={() => setEditing(undefined)}
+          onSaved={applySavedSession}
+          onDeleted={removeSession}
+        />
+      )}
     </div>
   );
 }

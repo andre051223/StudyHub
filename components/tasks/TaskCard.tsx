@@ -5,6 +5,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { Calendar, CheckSquare2, GripVertical, Timer } from 'lucide-react';
 import type { Task } from '@/lib/types';
 import { deadlineStatus, formatDeadline } from '@/lib/deadlines';
+import { useLocalToday } from '@/hooks/useLocalToday';
 import { formatMinutes } from '@/lib/stats';
 
 interface Props {
@@ -47,11 +48,24 @@ export function TaskCard({ task, onToggleComplete, onClick, isDragging, compact 
   const completedSubtasks = task.subtasks?.filter((s) => s.completed).length ?? 0;
   const totalSubtasks = task.subtasks?.length ?? 0;
 
-  const status = task.deadline && !task.completed ? deadlineStatus(task.deadline) : null;
+  // El día lo pone el navegador: en el servidor (UTC en Vercel) un plazo de
+  // hoy se etiquetaba «Ayer» a partir de las 19:00 hora de Colombia, y ese
+  // texto distinto entre servidor y cliente rompía la hidratación.
+  const todayMs = useLocalToday();
+  const today = todayMs === null ? null : new Date(todayMs);
+  const status =
+    today && task.deadline && !task.completed ? deadlineStatus(task.deadline, today) : null;
 
   // Tiempo dedicado a la tarea desde el temporizador (migración 006). Se
   // muestra a partir de un minuto: por debajo es ruido.
   const studiedMinutes = Math.round((task.studied_seconds ?? 0) / 60);
+
+  // Contraste con la estimación (migración 009). El porcentaje se calcula
+  // aunque no se haya estudiado nada: «0 % de 1h 30m» sigue diciendo cuánto
+  // queda por delante, que es la mitad del valor de haber estimado.
+  const estimate = task.estimated_minutes;
+  const estimatePct = estimate ? Math.round((studiedMinutes / estimate) * 100) : null;
+  const overEstimate = estimatePct !== null && estimatePct > 100;
 
   return (
     <div
@@ -111,7 +125,7 @@ export function TaskCard({ task, onToggleComplete, onClick, isDragging, compact 
                 )}
                 {status && task.deadline && (
                   <span className={`text-[11px] truncate ${DEADLINE_COLOR[status]}`}>
-                    {formatDeadline(task.deadline)}
+                    {today ? formatDeadline(task.deadline, today) : ''}
                   </span>
                 )}
               </div>
@@ -137,7 +151,7 @@ export function TaskCard({ task, onToggleComplete, onClick, isDragging, compact 
                   }`}
                 >
                   <Calendar size={11} />
-                  {formatDeadline(task.deadline)}
+                  {today ? formatDeadline(task.deadline, today) : ''}
                 </span>
               )}
 
@@ -148,15 +162,49 @@ export function TaskCard({ task, onToggleComplete, onClick, isDragging, compact 
                 </span>
               )}
 
-              {studiedMinutes > 0 && (
+              {estimate ? (
                 <span
-                  className="flex items-center gap-1 text-xs text-[var(--color-text-soft)]"
-                  title="Tiempo estudiado en esta tarea"
+                  className={`flex items-center gap-1 text-xs ${
+                    overEstimate
+                      ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-[var(--color-text-soft)]'
+                  }`}
+                  title={`${formatMinutes(studiedMinutes)} estudiados de ${formatMinutes(
+                    estimate
+                  )} estimados`}
                 >
                   <Timer size={11} />
-                  {formatMinutes(studiedMinutes)}
+                  {formatMinutes(studiedMinutes)} / {formatMinutes(estimate)}
                 </span>
+              ) : (
+                studiedMinutes > 0 && (
+                  <span
+                    className="flex items-center gap-1 text-xs text-[var(--color-text-soft)]"
+                    title="Tiempo estudiado en esta tarea"
+                  >
+                    <Timer size={11} />
+                    {formatMinutes(studiedMinutes)}
+                  </span>
+                )
               )}
+            </div>
+          )}
+
+          {/* Barra de avance sobre lo estimado. Solo con estimación: sin ella
+              no hay un «total» contra el que dibujar nada. */}
+          {!compact && estimatePct !== null && (
+            <div
+              className="mt-1.5 h-1 rounded-full bg-[var(--color-gray-border)] overflow-hidden"
+              role="img"
+              aria-label={`${estimatePct}% del tiempo estimado`}
+            >
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${Math.min(100, estimatePct)}%`,
+                  background: overEstimate ? '#f59e0b' : 'var(--color-primary)',
+                }}
+              />
             </div>
           )}
         </div>

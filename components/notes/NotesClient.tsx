@@ -16,7 +16,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useConfirm } from '@/components/shared/ConfirmProvider';
 import { toast } from 'sonner';
 import type { Folder as FolderType, Note } from '@/lib/types';
-import { formatDate } from '@/lib/utils';
+import { LocalTimestamp } from '@/components/shared/LocalTimestamp';
 
 interface Props {
   initialFolders: (FolderType & { note_count?: { count: number }[] })[];
@@ -348,7 +348,11 @@ function NoteListItem({
               </div>
             )}
             <span className="text-xs text-[var(--color-gray-mid)] ml-auto">
-              {note.updated_at ? formatDate(note.updated_at) : ''}
+              {note.updated_at ? (
+                <LocalTimestamp value={note.updated_at} format="date" />
+              ) : (
+                ''
+              )}
             </span>
           </div>
         </div>

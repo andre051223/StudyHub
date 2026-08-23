@@ -333,6 +333,10 @@ así el código no depende de un detalle del esquema y RLS sigue siendo quien ve
 | created_at | timestamptz | |
 | daily_goal_minutes | integer | default 60, CHECK 5–480 · *migración 003* |
 | weekly_goal_minutes | integer | default 300, CHECK 30–2400 · *migración 003* |
+| pomodoro_focus_minutes | integer | default 25, CHECK 5–90 · *migración 009* |
+| pomodoro_break_minutes | integer | default 5, CHECK 1–30 · *migración 009* |
+| pomodoro_long_break_minutes | integer | default 15, CHECK 5–60 y ≥ descanso corto · *migración 009* |
+| pomodoro_cycles_before_long_break | integer | default 4, CHECK 2–8 · *migración 009* |
 
 **`categories`** — materias/áreas compartidas por tareas y sesiones.
 | Columna | Tipo | Notas |
@@ -387,18 +391,31 @@ RLS por pertenencia a la tarea del usuario.
 | category_id | uuid (FK, SET NULL) | nullable |
 | duration_minutes | integer | **nullable** · duración *planeada*; `null` en modo cronómetro. CHECK 1–1440 · el modelo valida 10–120 solo para `simple` · *migración 005* |
 | actual_duration_seconds | integer | tiempo real transcurrido · CHECK ≥ 0 · **la métrica que usan todas las estadísticas** |
-| mode | enum `study_mode` | `simple`, `pomodoro` (legado), `stopwatch` · *migración 004* |
+| mode | enum `study_mode` | `simple`, `pomodoro`, `stopwatch` (*migración 004*), `manual` (*migración 009*) |
 | pomodoro_cycles_completed | integer | default 0 |
 | started_at | timestamptz | |
 | completed_at | timestamptz | null = sesión abandonada |
 | notes | text | nullable |
+| focus_rating | text | nullable · CHECK `focused`/`ok`/`distracted` · *migración 009* |
 
 ### 6.2 Notas sobre los modos de estudio
 
-`StudyMode = 'simple' | 'stopwatch' | 'pomodoro'`. **`pomodoro` es legado**: ya no es
-seleccionable en la UI pero se conserva en el enum para poder mostrar sesiones antiguas.
-Modos activos: **simple** (cuenta regresiva de la duración elegida) y **stopwatch** (cronómetro
-ascendente).
+`StudyMode = 'simple' | 'stopwatch' | 'pomodoro' | 'manual'`.
+
+- **simple** — cuenta regresiva de la duración elegida con el slider (10–120 min).
+- **stopwatch** — cronómetro ascendente, sin meta. No tiene duración planeada.
+- **pomodoro** — bloques de foco encadenados con descansos (migración 009). Cada bloque de
+  foco se guarda como su propia sesión: es tiempo realmente estudiado y debe contar aunque la
+  tanda se abandone. Los descansos no se guardan.
+- **manual** — sesión escrita a mano después de estudiar (migración 009). Tampoco tiene
+  duración planeada; se distingue de `simple` a propósito para que el historial no presente
+  como cronometrado lo que es recordado.
+
+El rango válido de `duration_minutes` depende del modo y vive en `PLANNED_RANGE`
+(`lib/models/SessionModel.ts`): 10–120 para `simple`, 5–90 para `pomodoro`, y `null`
+obligatorio para `stopwatch` y `manual`. Antes esta regla era un `if (mode !== 'stopwatch')`,
+que al reintroducir el Pomodoro habría exigido a un bloque de foco de 5 min cumplir el mínimo
+de 10 del temporizador.
 
 ### 6.3 Servicio SOAP (interoperabilidad)
 
@@ -464,11 +481,17 @@ ascendente).
 - Al completar: sonido (`public/sounds/bell.wav`) + notificación del navegador. `MiniTimer`
   permite ver el timer activo desde otras vistas.
 - **Historial** (`SessionHistory`): sesiones completadas con filtros.
-- **Estadísticas** (`StudyStats`, Recharts): minutos por día, distribución por categoría,
-  y tarjetas de resumen. `SessionModel.getStats()` calcula minutos de la semana, racha
-  (`currentStreak`), categoría top del mes y promedio diario.
-- **Metas** (`StudyGoals`): metas diaria/semanal guardadas en `profiles`
-  (`daily_goal_minutes`, `weekly_goal_minutes`).
+- **Estadísticas** (`StudyStats`): tarjetas de resumen, gráfica de barras de minutos por
+  día (Recharts), **tabla de tiempo por categoría** (`CategoryBreakdown`) ordenable y
+  filtrable por día / semana / mes con comparativa contra el mismo tramo del periodo
+  anterior, **mapa de calor de constancia** (`StudyHeatmap`, desde la primera sesión y hasta un año) y **franja horaria + calidad
+  percibida** (`StudyPatterns`). `SessionModel.getStats()` calcula minutos de la semana,
+  racha (`currentStreak`), categoría top del mes y promedio diario.
+- **Alta manual y corrección de sesiones** (`SessionForm`): registrar estudio hecho sin la
+  app (`mode: 'manual'`) y editar o eliminar una sesión guardada. Sin esto, una sesión
+  inflada por olvidar detener el cronómetro falseaba la racha para siempre.
+- **Metas** (`StudyGoals`): metas diaria/semanal y ajustes del ciclo Pomodoro, todo en
+  `profiles` (`daily_goal_minutes`, `weekly_goal_minutes`, `pomodoro_*`).
 
 ### 8.4 Categorías (`/categories`)
 - CRUD (listar, crear, renombrar, recolorear, eliminar). Constraints de unicidad, longitud y

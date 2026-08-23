@@ -68,7 +68,7 @@ export function CategoryForm({ category, onSuccess, onCancel }: Props) {
           htmlFor="cat-name"
           className="block text-sm font-medium text-[var(--color-text)] mb-1"
         >
-          Nombre <span className="text-red-500">*</span>
+          Nombre <span className="text-red-500 dark:text-red-400">*</span>
         </label>
         <input
           id="cat-name"
@@ -79,7 +79,7 @@ export function CategoryForm({ category, onSuccess, onCancel }: Props) {
           className="w-full px-4 py-2.5 rounded-lg border border-[var(--color-gray-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] text-[var(--color-text)] text-sm"
         />
         {errors.name && (
-          <p className="mt-1 text-xs text-red-500">{errors.name.message}</p>
+          <p className="mt-1 text-xs text-red-500 dark:text-red-400">{errors.name.message}</p>
         )}
       </div>
 
@@ -112,7 +112,7 @@ export function CategoryForm({ category, onSuccess, onCancel }: Props) {
           />
         </div>
         {errors.color && (
-          <p className="mt-1 text-xs text-red-500">{errors.color.message}</p>
+          <p className="mt-1 text-xs text-red-500 dark:text-red-400">{errors.color.message}</p>
         )}
       </div>
 
