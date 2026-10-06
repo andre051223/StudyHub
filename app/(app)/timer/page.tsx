@@ -1,7 +1,7 @@
 import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import { CategoryModel, SessionModel } from '@/lib/models';
 import { TimerClient } from '@/components/timer/TimerClient';
-import { DEFAULT_POMODORO, type OpenTask } from '@/lib/types';
+import type { OpenTask } from '@/lib/types';
 
 export default async function TimerPage() {
   const supabase = await createClient();
@@ -37,7 +37,7 @@ export default async function TimerPage() {
     supabase
       .from('profiles')
       .select(
-        'daily_goal_minutes, weekly_goal_minutes, pomodoro_focus_minutes, pomodoro_break_minutes, pomodoro_long_break_minutes, pomodoro_cycles_before_long_break'
+        'daily_goal_minutes, weekly_goal_minutes'
       )
       .eq('id', user!.id)
       .single(),
@@ -68,14 +68,6 @@ export default async function TimerPage() {
       openTasks={tasksWithTime}
       dailyGoal={profile?.daily_goal_minutes ?? 60}
       weeklyGoal={profile?.weekly_goal_minutes ?? 300}
-      pomodoro={{
-        focusMinutes: profile?.pomodoro_focus_minutes ?? DEFAULT_POMODORO.focusMinutes,
-        breakMinutes: profile?.pomodoro_break_minutes ?? DEFAULT_POMODORO.breakMinutes,
-        longBreakMinutes:
-          profile?.pomodoro_long_break_minutes ?? DEFAULT_POMODORO.longBreakMinutes,
-        cyclesBeforeLongBreak:
-          profile?.pomodoro_cycles_before_long_break ?? DEFAULT_POMODORO.cyclesBeforeLongBreak,
-      }}
     />
   );
 }

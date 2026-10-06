@@ -1,20 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import ReactDOM from 'react-dom/client';
-import { Play, Pause, Square, PictureInPicture2, Target, X } from 'lucide-react';
-import { MiniTimer } from './MiniTimer';
+import { useState, useEffect, useCallback } from 'react';
+import { Play, Pause, Square, PictureInPicture2, Target, X, Coffee, SkipForward } from 'lucide-react';
 import { toast } from 'sonner';
-import { createSessionAction, updateSessionAction } from '@/app/(app)/timer/actions';
-import type {
-  Category,
-  OpenTask,
-  PomodoroSettings,
-  StudySession,
-  StudyMode,
-  TimerState,
-  TaskQuadrant,
-} from '@/lib/types';
+import { updateSessionAction } from '@/app/(app)/timer/actions';
+import type { Category, OpenTask, StudySession, TaskQuadrant } from '@/lib/types';
 import { formatMinutes, type FocusRatingKey, type StatsSession } from '@/lib/stats';
 import { MIN_TIMER_MINUTES, MAX_TIMER_MINUTES } from '@/lib/models/SessionModel';
 import { formatDuration, getCircumference } from '@/lib/utils';
@@ -23,8 +13,8 @@ import { SessionForm } from './SessionForm';
 import { StudyStats } from './StudyStats';
 import { StudyGoals } from './StudyGoals';
 import { FocusRatingPicker } from './focusRating';
+import { useTimer } from './TimerProvider';
 
-const STORAGE_KEY = 'studyhub_timer_state';
 // Rango del selector de duración del temporizador (en minutos). Vive en el
 // modelo para que la UI y la validación de servidor no puedan divergir.
 const MIN_DURATION = MIN_TIMER_MINUTES;
@@ -46,34 +36,6 @@ const MODE_LABELS: Record<'simple' | 'stopwatch' | 'pomodoro', string> = {
   stopwatch: 'Cronómetro',
   pomodoro: 'Pomodoro',
 };
-
-const defaultState: TimerState = {
-  isRunning: false,
-  isPaused: false,
-  mode: 'simple',
-  durationMinutes: 25,
-  categoryId: null,
-  taskId: null,
-  startedAt: null,
-  pausedAt: null,
-  totalPausedMs: 0,
-  sessionId: null,
-  phase: 'focus',
-  cyclesDone: 0,
-};
-
-/**
- * Minutos que dura el tramo en curso.
- *
- * En Pomodoro la duración no la fija el usuario en un slider sino la fase, así
- * que `durationMinutes` deja de ser la fuente de verdad y todo el reloj
- * —cuenta atrás, anillo y guardado— tiene que preguntar por aquí.
- */
-function phaseMinutes(s: TimerState, p: PomodoroSettings): number {
-  if (s.mode !== 'pomodoro') return s.durationMinutes;
-  if (s.phase === 'focus') return p.focusMinutes;
-  return s.phase === 'long_break' ? p.longBreakMinutes : p.breakMinutes;
-}
 
 /** Proyección de una sesión completa a la forma mínima de las estadísticas. */
 function toStatsSession(s: StudySession): StatsSession {
@@ -101,9 +63,14 @@ interface Props {
   openTasks: OpenTask[];
   dailyGoal: number;
   weeklyGoal: number;
-  pomodoro: PomodoroSettings;
 }
 
+/**
+ * Pantalla de /timer. El reloj en sí (estado, latido, guardado, ventana
+ * flotante) vive en `TimerProvider`, montado en el layout de (app), para que
+ * siga corriendo al navegar por el resto de la app. Este componente es solo
+ * la vista completa más el historial, las estadísticas y las metas.
+ */
 export function TimerClient({
   categories,
   initialSessions,
@@ -111,255 +78,45 @@ export function TimerClient({
   openTasks,
   dailyGoal,
   weeklyGoal,
-  pomodoro: initialPomodoro,
 }: Props) {
-  const [state, setState] = useState<TimerState>(defaultState);
-  const [secondsLeft, setSecondsLeft] = useState(defaultState.durationMinutes * 60);
+  const {
+    state,
+    setState,
+    secondsLeft,
+    totalDuration,
+    phaseLabel,
+    awaitingBreak,
+    startLabel,
+    pomodoro,
+    setPomodoro,
+    pendingRating,
+    setPendingRating,
+    pipOpen,
+    openPiP,
+    start: handleStart,
+    pause: handlePause,
+    resume: handleResume,
+    stop: handleStop,
+    skipBreak: handleSkipBreak,
+    changeMode: handleModeChange,
+    onSessionSaved,
+  } = useTimer();
   const [activeTab, setActiveTab] = useState<'history' | 'stats' | 'goals'>('history');
   const [sessions, setSessions] = useState(initialSessions);
   // Se mantiene aparte del historial para que las estadísticas sigan cubriendo
   // el año completo y a la vez se actualicen al guardar una sesión nueva.
   const [statsSessions, setStatsSessions] = useState(initialStatsSessions);
-  const [pomodoro, setPomodoro] = useState(initialPomodoro);
-  // Sesión recién completada, a la espera de que el usuario diga cómo le fue.
-  const [pendingRating, setPendingRating] = useState<StudySession | null>(null);
   // `undefined` = formulario cerrado; `null` = alta manual; objeto = edición.
   const [editing, setEditing] = useState<StudySession | null | undefined>(undefined);
-  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const savingRef = useRef(false);
-  const stateRef = useRef(state);
-  const pipRootRef = useRef<ReturnType<typeof ReactDOM.createRoot> | null>(null);
-  const [pipWindow, setPipWindow] = useState<Window | null>(null);
 
-  // Keep stateRef in sync so async callbacks always see latest state
-  useEffect(() => { stateRef.current = state; });
-
-  // Misma técnica para los ajustes del Pomodoro: los cambia la pestaña de
-  // metas mientras el reloj puede estar corriendo, y los callbacks asíncronos
-  // del ciclo tienen que ver siempre el último valor.
-  const pomodoroRef = useRef(pomodoro);
-  useEffect(() => { pomodoroRef.current = pomodoro; });
-
-  // Misma técnica para la lista de tareas: el effect de hidratación necesita
-  // consultarla, pero no debe volver a ejecutarse si cambia (rehidratar desde
-  // localStorage a mitad de una sesión pisaría el estado en curso).
-  const openTasksRef = useRef(openTasks);
-  useEffect(() => { openTasksRef.current = openTasks; });
-
-  // Load persisted state on mount (client only). Se hace en un effect, y no en
-  // un inicializador lazy de useState, para que el render del servidor y el
-  // primer render del cliente coincidan (localStorage no existe en SSR) y no se
-  // produzca un mismatch de hidratación.
+  // Tareas que ya no están pendientes (o que se borraron): la referencia se
+  // descarta en vez de guardar una sesión apuntando a algo que ya no existe.
+  // Con el reloj en marcha no se toca: la sesión en curso es de esa tarea.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as TimerState;
-        // Estados guardados antes de que el Pomodoro tuviera fases propias.
-        parsed.phase = parsed.phase ?? 'focus';
-        parsed.cyclesDone = parsed.cyclesDone ?? 0;
-        // Estados guardados antes de que existiera la tarea asociada, y
-        // tareas que ya no están pendientes: la referencia se descarta en vez
-        // de guardar una sesión apuntando a algo que ya no existe.
-        parsed.taskId =
-          parsed.taskId && openTasksRef.current.some((t) => t.id === parsed.taskId)
-            ? parsed.taskId
-            : null;
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- hidratación desde localStorage
-        setState(parsed);
-      }
-    } catch {}
-  }, []);
-
-  // Persist state to localStorage
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
-
-  // Compute elapsed seconds since the timer started (used by the stopwatch
-  // and to derive the remaining time for the countdown).
-  const computeElapsedSeconds = useCallback((s: TimerState): number => {
-    if (!s.isRunning && !s.isPaused) return 0;
-    const now = s.isPaused ? s.pausedAt! : Date.now();
-    return Math.max(0, Math.floor((now - s.startedAt! - s.totalPausedMs) / 1000));
-  }, []);
-
-  // Compute seconds left from timestamps (countdown modes only)
-  const computeSecondsLeft = useCallback(
-    (s: TimerState): number => {
-      const total = phaseMinutes(s, pomodoroRef.current) * 60;
-      if (!s.isRunning && !s.isPaused) return total;
-      return Math.max(0, total - computeElapsedSeconds(s));
-    },
-    [computeElapsedSeconds]
-  );
-
-  // `handleComplete` se recrea en cada render, pero el intervalo no debe
-  // reiniciarse por eso: se invoca a través de un ref para que las
-  // dependencias del effect sean solo los campos del temporizador que sí
-  // justifican reprogramarlo.
-  const handleCompleteRef = useRef(handleComplete);
-  useEffect(() => { handleCompleteRef.current = handleComplete; });
-
-  // Etiqueta del tramo en curso. Declarada aquí arriba porque el effect de la
-  // ventana flotante la lista entre sus dependencias, y un `const` posterior
-  // estaría en zona muerta temporal al evaluarse el array.
-  const phaseLabel =
-    state.mode === 'stopwatch'
-      ? 'Cronómetro'
-      : state.mode === 'pomodoro'
-      ? state.phase === 'focus'
-        ? `Foco · bloque ${state.cyclesDone + 1}`
-        : state.phase === 'long_break'
-        ? 'Descanso largo'
-        : 'Descanso'
-      : 'Temporizador';
-
-  // Tick. `secondsLeft` holds the value shown on screen: remaining seconds for
-  // the countdown, elapsed seconds for the stopwatch.
-  useEffect(() => {
-    const tick = (s: TimerState) =>
-      s.mode === 'stopwatch' ? computeElapsedSeconds(s) : computeSecondsLeft(s);
-
-    if (state.isRunning && !state.isPaused) {
-      tickRef.current = setInterval(() => {
-        const value = tick(stateRef.current);
-        setSecondsLeft(value);
-        // The stopwatch counts up with no target, so it never auto-completes.
-        if (stateRef.current.mode !== 'stopwatch' && value <= 0 && !savingRef.current) {
-          savingRef.current = true;
-          handleCompleteRef.current().finally(() => { savingRef.current = false; });
-        }
-      }, 500);
-    } else {
-      if (tickRef.current) clearInterval(tickRef.current);
-      // stateRef ya está sincronizado: su effect se declara antes que este.
-      setSecondsLeft(tick(stateRef.current));
-    }
-    return () => { if (tickRef.current) clearInterval(tickRef.current); };
-  }, [
-    state.isRunning,
-    state.isPaused,
-    state.startedAt,
-    state.durationMinutes,
-    state.mode,
-    state.phase,
-    pomodoro,
-    computeElapsedSeconds,
-    computeSecondsLeft,
-  ]);
-
-  async function openPiP() {
-    if (!('documentPictureInPicture' in window)) {
-      toast.error('Tu navegador no soporta la ventana flotante. Usa Chrome o Edge 116+.');
-      return;
-    }
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pip: Window = await (window as any).documentPictureInPicture.requestWindow({
-        width: 280,
-        height: 200,
-        disallowReturnToOpener: false,
-      });
-
-      // Reset de la ventana flotante + copia de las variables de tema actuales
-      // para que el MiniTimer herede los colores (incluido el modo oscuro) y su
-      // contenido escale al redimensionar la ventana.
-      const theme = document.documentElement.dataset.theme ?? 'light';
-      const root = getComputedStyle(document.documentElement);
-      const vars = ['--color-surface', '--color-text', '--color-text-soft', '--color-gray-border']
-        .map((v) => `${v}: ${root.getPropertyValue(v).trim()};`)
-        .join(' ');
-      const style = pip.document.createElement('style');
-      style.textContent = `
-        html, body { margin: 0; height: 100%; overflow: hidden; }
-        body { ${vars} }
-      `;
-      pip.document.head.appendChild(style);
-      pip.document.documentElement.dataset.theme = theme;
-
-      pip.addEventListener('pagehide', () => setPipWindow(null));
-      setPipWindow(pip);
-    } catch {
-      toast.error('No se pudo abrir la ventana flotante');
-    }
-  }
-
-  // Los controles del MiniTimer se recrean en cada render. Envolverlos en
-  // callbacks estables evita que la ventana flotante se vuelva a renderizar
-  // solo porque cambió la identidad de una función.
-  const handlersRef = useRef({ handleStart, handlePause, handleResume, handleStop });
-  useEffect(() => {
-    handlersRef.current = { handleStart, handlePause, handleResume, handleStop };
-  });
-  const pipHandlers = useRef({
-    onStart: () => handlersRef.current.handleStart(),
-    onPause: () => handlersRef.current.handlePause(),
-    onResume: () => handlersRef.current.handleResume(),
-    onStop: () => handlersRef.current.handleStop(),
-  }).current;
-
-  // Sync mini timer into PiP window
-  useEffect(() => {
-    if (!pipWindow) return;
-    if (!pipRootRef.current) {
-      pipRootRef.current = ReactDOM.createRoot(pipWindow.document.body);
-    }
-    pipRootRef.current.render(
-      <MiniTimer
-        secondsLeft={secondsLeft}
-        phaseLabel={phaseLabel}
-        isRunning={state.isRunning}
-        isPaused={state.isPaused}
-        onPause={pipHandlers.onPause}
-        onResume={pipHandlers.onResume}
-        onStop={pipHandlers.onStop}
-        onStart={pipHandlers.onStart}
-      />
-    );
-  }, [pipWindow, secondsLeft, state.isRunning, state.isPaused, phaseLabel, pipHandlers]);
-
-  // Clean up PiP root when window closes
-  useEffect(() => {
-    if (!pipWindow) {
-      pipRootRef.current = null;
-    }
-  }, [pipWindow]);
-
-  function playBell() {
-    try {
-      if (!audioRef.current) {
-        audioRef.current = new Audio('/sounds/bell.wav');
-      }
-      audioRef.current.play().catch(() => {
-        // Fallback to Web Audio API
-        const ctx = new AudioContext();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.frequency.value = 880;
-        osc.type = 'sine';
-        gain.gain.setValueAtTime(0.5, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.5);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 1.5);
-      });
-    } catch {}
-  }
-
-  function sendBrowserNotification(message: string) {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('StudyHub', { body: message, icon: '/favicon.ico' });
-    }
-  }
-
-  async function requestNotificationPermission() {
-    if ('Notification' in window && Notification.permission === 'default') {
-      await Notification.requestPermission();
-    }
-  }
+    if (state.isRunning || !state.taskId) return;
+    if (openTasks.some((t) => t.id === state.taskId)) return;
+    setState((prev) => ({ ...prev, taskId: null }));
+  }, [openTasks, state.isRunning, state.taskId, setState]);
 
   // ── Reconciliación de las dos listas ────────────────────────
   //
@@ -368,7 +125,7 @@ export function TimerClient({
   // que aplicarse a ambas. Se ordena por fecha porque una sesión registrada a
   // mano puede ser de la semana pasada y no debe colarse arriba del todo.
 
-  function applySavedSession(saved: StudySession) {
+  const applySavedSession = useCallback((saved: StudySession) => {
     setSessions((prev) => {
       const next = prev.some((s) => s.id === saved.id)
         ? prev.map((s) => (s.id === saved.id ? (saved as HistorySession) : s))
@@ -383,7 +140,12 @@ export function TimerClient({
       if (!saved.completed_at) return without;
       return [toStatsSession(saved), ...without].sort(byStartedAtDesc);
     });
-  }
+  }, []);
+
+  // Las sesiones que guarda el reloj (el proveedor) entran en las listas de
+  // esta pantalla. Las que se guardan estando en otra página llegan con el
+  // fetch del servidor al volver a /timer.
+  useEffect(() => onSessionSaved(applySavedSession), [onSessionSaved, applySavedSession]);
 
   function removeSession(id: string) {
     setSessions((prev) => prev.filter((s) => s.id !== id));
@@ -407,170 +169,9 @@ export function TimerClient({
     applySavedSession(result.data);
   }
 
-  // ── Ciclo del reloj ─────────────────────────────────────────
-
-  async function handleComplete() {
-    const s = stateRef.current;
-    if (s.mode === 'pomodoro') {
-      await handlePomodoroPhaseEnd();
-      return;
-    }
-
-    playBell();
-    sendBrowserNotification('¡Sesión completada! Tiempo de descansar.');
-    const saved = await saveSession(true);
-    setState({
-      ...defaultState,
-      mode: s.mode,
-      durationMinutes: s.durationMinutes,
-      categoryId: s.categoryId,
-      taskId: s.taskId,
-    });
-    toast.success('¡Sesión completada!');
-    if (saved) setPendingRating(saved);
-  }
-
-  /**
-   * Fin de una fase del Pomodoro.
-   *
-   * Cada bloque de foco se guarda como su propia sesión: es tiempo realmente
-   * estudiado y tiene que contar aunque la tanda se abandone a la mitad. Los
-   * descansos no se guardan —no son estudio— y por eso tampoco preguntan qué
-   * tal fueron. La siguiente fase arranca sola, que es lo que distingue al
-   * Pomodoro de encadenar temporizadores a mano.
-   */
-  async function handlePomodoroPhaseEnd() {
-    const s = stateRef.current;
-    playBell();
-
-    if (s.phase !== 'focus') {
-      sendBrowserNotification('Fin del descanso. A por el siguiente bloque.');
-      setState({
-        ...s,
-        phase: 'focus',
-        isRunning: true,
-        isPaused: false,
-        startedAt: Date.now(),
-        pausedAt: null,
-        totalPausedMs: 0,
-      });
-      toast.info('Fin del descanso');
-      return;
-    }
-
-    const saved = await saveSession(true);
-    const cyclesDone = s.cyclesDone + 1;
-    const longBreak = cyclesDone % pomodoroRef.current.cyclesBeforeLongBreak === 0;
-
-    sendBrowserNotification(
-      longBreak ? '¡Tanda completada! Te has ganado un descanso largo.' : 'Bloque completado. Descansa un poco.'
-    );
-    setState({
-      ...s,
-      phase: longBreak ? 'long_break' : 'break',
-      cyclesDone,
-      isRunning: true,
-      isPaused: false,
-      startedAt: Date.now(),
-      pausedAt: null,
-      totalPausedMs: 0,
-    });
-    toast.success(longBreak ? '¡Tanda completada!' : `Bloque ${cyclesDone} completado`);
-    // Se pregunta durante el descanso, que es justo cuando hay tiempo.
-    if (saved) setPendingRating(saved);
-  }
-
-  async function saveSession(completed: boolean): Promise<StudySession | null> {
-    const s = stateRef.current;
-    const isCountdown = s.mode !== 'stopwatch';
-    const planned = phaseMinutes(s, pomodoroRef.current);
-    // Tiempo realmente estudiado. En el cronómetro no hay duración planeada,
-    // así que se usa el tiempo transcurrido directamente.
-    const actual = Math.max(
-      0,
-      isCountdown ? planned * 60 - computeSecondsLeft(s) : computeElapsedSeconds(s)
-    );
-    // Por Server Action: SessionModel valida el rango de la duración planeada
-    // según el modo y que el tiempo transcurrido no sea negativo ni absurdo.
-    // Insertando directo nada de eso corría.
-    const result = await createSessionAction({
-      category_id: s.categoryId,
-      task_id: s.taskId,
-      // El cronómetro no tiene duración planeada: se guarda null. Antes se
-      // escribía Math.round(actual / 60), que rompía el CHECK de la base
-      // tanto por arriba (más de 2 h) como por abajo (menos de 30 s → 0), y
-      // la sesión se perdía con un toast de error.
-      duration_minutes: isCountdown ? planned : null,
-      actual_duration_seconds: actual,
-      mode: s.mode,
-      // El bloque en curso solo suma si llegó al final: detener a la mitad
-      // guarda el tiempo estudiado, no un pomodoro completado.
-      pomodoro_cycles_completed:
-        s.mode === 'pomodoro' ? s.cyclesDone + (completed ? 1 : 0) : 0,
-      started_at: new Date(s.startedAt!).toISOString(),
-      completed_at: completed ? new Date().toISOString() : null,
-    });
-
-    if (!result.ok) {
-      toast.error(result.error);
-      return null;
-    }
-
-    applySavedSession(result.data);
-    return result.data;
-  }
-
-  async function handleStart() {
-    await requestNotificationPermission();
-    setState((prev) => ({
-      ...prev,
-      isRunning: true,
-      isPaused: false,
-      startedAt: Date.now(),
-      totalPausedMs: 0,
-    }));
-  }
-
-  function handlePause() {
-    setState((prev) => ({ ...prev, isPaused: true, pausedAt: Date.now() }));
-  }
-
-  function handleResume() {
-    setState((prev) => ({
-      ...prev,
-      isPaused: false,
-      totalPausedMs: prev.totalPausedMs + (Date.now() - (prev.pausedAt ?? Date.now())),
-      pausedAt: null,
-    }));
-  }
-
-  async function handleStop() {
-    const s = stateRef.current;
-    // Detener durante un descanso no guarda nada: un descanso no es estudio, y
-    // registrarlo inflaría el tiempo del día con minutos que nadie estudió.
-    const isBreak = s.mode === 'pomodoro' && s.phase !== 'focus';
-    if (s.startedAt && !isBreak) await saveSession(false);
-    setState({
-      ...defaultState,
-      mode: s.mode,
-      durationMinutes: s.durationMinutes,
-      categoryId: s.categoryId,
-      taskId: s.taskId,
-    });
-    toast.info('Sesión detenida');
-  }
-
-  function handleModeChange(mode: StudyMode) {
-    if (state.isRunning) return;
-    // Cambiar de modo reinicia la tanda: los bloques completados pertenecen al
-    // ciclo que se abandona.
-    setState((prev) => ({ ...prev, mode, phase: 'focus', cyclesDone: 0 }));
-  }
-
   const isStopwatch = state.mode === 'stopwatch';
   const isPomodoro = state.mode === 'pomodoro';
   const isRest = isPomodoro && state.phase !== 'focus';
-  const totalDuration = phaseMinutes(state, pomodoro) * 60;
   const idle = !state.isRunning && !state.isPaused;
   const displaySeconds = isStopwatch
     ? secondsLeft // tiempo transcurrido
@@ -675,13 +276,24 @@ export function TimerClient({
             {/* Controls */}
             <div className="flex items-center gap-3">
               {!state.isRunning ? (
-                <button
-                  onClick={handleStart}
-                  className="flex items-center gap-2 px-6 py-3 bg-[var(--color-primary)] text-white font-semibold rounded-xl hover:bg-[var(--color-primary-dark)] transition-all hover:-translate-y-0.5"
-                >
-                  <Play size={18} />
-                  Iniciar
-                </button>
+                <>
+                  <button
+                    onClick={handleStart}
+                    className="flex items-center gap-2 px-6 py-3 bg-[var(--color-primary)] text-white font-semibold rounded-xl hover:bg-[var(--color-primary-dark)] transition-all hover:-translate-y-0.5"
+                  >
+                    {awaitingBreak ? <Coffee size={18} /> : <Play size={18} />}
+                    {startLabel}
+                  </button>
+                  {awaitingBreak && (
+                    <button
+                      onClick={handleSkipBreak}
+                      className="flex items-center gap-2 px-5 py-3 border border-[var(--color-gray-border)] text-[var(--color-text-soft)] font-medium rounded-xl hover:bg-[var(--color-gray-light)] transition-colors"
+                    >
+                      <SkipForward size={16} />
+                      Siguiente bloque
+                    </button>
+                  )}
+                </>
               ) : (
                 <>
                   {state.isPaused ? (
@@ -708,7 +320,7 @@ export function TimerClient({
                     <Square size={16} />
                     Detener
                   </button>
-                  {!pipWindow && (
+                  {!pipOpen && (
                     <button
                       onClick={openPiP}
                       title="Ventana flotante"
@@ -786,7 +398,7 @@ export function TimerClient({
                 <p>
                   {pomodoro.focusMinutes} min de foco y {pomodoro.breakMinutes} de descanso;
                   cada {pomodoro.cyclesBeforeLongBreak} bloques, {pomodoro.longBreakMinutes} min
-                  largos. Las fases se encadenan solas.
+                  largos. Al terminar cada bloque eliges si descansar o pasar al siguiente.
                 </p>
                 <button
                   onClick={() => setActiveTab('goals')}

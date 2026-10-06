@@ -11,6 +11,11 @@ interface Props {
   onResume: () => void;
   onStop: () => void;
   onStart: () => void;
+  /** Texto del botón de arranque (p. ej. "Iniciar descanso" en el Pomodoro). */
+  startLabel?: string;
+  /** Acción secundaria con el reloj parado: saltar el descanso del Pomodoro. */
+  onSkip?: () => void;
+  skipLabel?: string;
 }
 
 const PRIMARY = '#67b31f';
@@ -38,6 +43,9 @@ export function MiniTimer({
   onResume,
   onStop,
   onStart,
+  startLabel = 'Iniciar',
+  onSkip,
+  skipLabel = 'Saltar',
 }: Props) {
   return (
     <div
@@ -108,17 +116,32 @@ export function MiniTimer({
             </button>
           </>
         ) : (
-          <button
-            onClick={onStart}
-            style={{
-              ...buttonBase,
-              background: PRIMARY,
-              border: `1.5px solid ${PRIMARY}`,
-              color: '#ffffff',
-            }}
-          >
-            Iniciar
-          </button>
+          <>
+            <button
+              onClick={onStart}
+              style={{
+                ...buttonBase,
+                background: PRIMARY,
+                border: `1.5px solid ${PRIMARY}`,
+                color: '#ffffff',
+              }}
+            >
+              {startLabel}
+            </button>
+            {onSkip && (
+              <button
+                onClick={onSkip}
+                style={{
+                  ...buttonBase,
+                  background: 'transparent',
+                  border: '1.5px solid var(--color-gray-border, #e2e8f0)',
+                  color: 'var(--color-text-soft, #444444)',
+                }}
+              >
+                {skipLabel}
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>

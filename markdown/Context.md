@@ -125,7 +125,8 @@ StudyHub/
 │   │   └── reset-password/page.tsx
 │   ├── (app)/                        # Rutas protegidas (requieren sesión)
 │   │   ├── layout.tsx                # Verifica sesión (redirect a /login) + Navbar,
-│   │   │                             # ConfirmProvider, paleta Ctrl+K, aviso de instalación
+│   │   │                             # ConfirmProvider, paleta Ctrl+K, aviso de instalación,
+│   │   │                             # TimerProvider + TimerIndicator (reloj global)
 │   │   ├── actions.ts                # Server Action de búsqueda global (Ctrl+K)
 │   │   ├── dashboard/page.tsx        # Resumen del día: metas, racha, qué vence hoy
 │   │   ├── agenda/page.tsx           # Fechas límite, semana a semana
@@ -148,7 +149,7 @@ StudyHub/
 │   │   ├── folders/route.ts         ·  folders/[id]/route.ts
 │   │   ├── sessions/route.ts
 │   │   └── soap/route.ts             # Endpoint SOAP (GET=WSDL, POST=operación)
-│   ├── icons/                        # icon-192, icon-512 (rutas dinámicas PWA)
+│   ├── icons/                        # icon-192, icon-512 (PWA) y timer (ventana flotante)
 │   ├── icon.tsx / apple-icon.tsx     # Favicons generados
 │   ├── manifest.ts                   # Web App Manifest (PWA: iconos, capturas, accesos)
 │   ├── screenshots/[variant]/route.tsx # Capturas del manifest generadas con ImageResponse
@@ -161,7 +162,8 @@ StudyHub/
 │   ├── landing/                      # ShowcaseSection, mockups
 │   ├── notes/                        # NotesClient, NoteEditor
 │   ├── tasks/                        # TasksClient, KanbanColumn, TaskCard, TaskModal
-│   ├── timer/                        # TimerClient, MiniTimer, SessionHistory, StudyStats, StudyGoals
+│   ├── timer/                        # TimerProvider (motor global), TimerClient, TimerIndicator,
+│   │                                 # MiniTimer, SessionHistory, StudyStats, StudyGoals
 │   ├── categories/                   # CategoriesClient, CategoryForm, CategoryList
 │   └── shared/                       # Navbar, ThemeToggle, ProfileClient, ServiceWorkerRegistrar,
 │                                     # Modal, ConfirmProvider, CommandPalette, InstallPrompt
@@ -404,9 +406,12 @@ RLS por pertenencia a la tarea del usuario.
 
 - **simple** — cuenta regresiva de la duración elegida con el slider (10–120 min).
 - **stopwatch** — cronómetro ascendente, sin meta. No tiene duración planeada.
-- **pomodoro** — bloques de foco encadenados con descansos (migración 009). Cada bloque de
+- **pomodoro** — bloques de foco con descansos (migración 009). Cada bloque de
   foco se guarda como su propia sesión: es tiempo realmente estudiado y debe contar aunque la
-  tanda se abandone. Los descansos no se guardan.
+  tanda se abandone. Los descansos no se guardan. Las fases **no** se encadenan solas: al
+  terminar un bloque el reloj se detiene en el descanso que toca y el usuario elige
+  "Iniciar descanso" o "Siguiente bloque" (`handleSkipBreak`); al terminar el descanso espera
+  a que inicie el siguiente bloque.
 - **manual** — sesión escrita a mano después de estudiar (migración 009). Tampoco tiene
   duración planeada; se distingue de `simple` a propósito para que el historial no presente
   como cronometrado lo que es recordado.
@@ -474,12 +479,28 @@ de 10 del temporizador.
   y toggle de completadas.
 
 ### 8.3 Temporizador (`/timer`)
-- `TimerClient` con modos **simple** (regresiva) y **stopwatch** (ascendente); selector de
-  categoría; rango 10–120 min. Controles iniciar/pausar/reanudar/detener.
+- **El reloj es global:** el motor (estado, latido, guardado de la sesión, avisos, ventana
+  flotante, ajustes del Pomodoro) vive en `TimerProvider`, montado en `app/(app)/layout.tsx`,
+  y se consume con `useTimer()`. Así la sesión sigue corriendo y se registra al terminar
+  aunque el usuario esté en notas, tareas o la agenda. Hay dos vistas sobre él:
+  `TimerClient` (pantalla completa de `/timer`) y `TimerIndicator` (reloj compacto abajo a la
+  izquierda en el resto de páginas, con pausar/detener y las decisiones del Pomodoro).
+  `TimerClient` se entera de las sesiones guardadas con `onSessionSaved()` para refrescar el
+  historial y las estadísticas. Los ajustes del Pomodoro los lee el layout del perfil.
+- `TimerClient` con modos **simple** (regresiva), **stopwatch** (ascendente) y **pomodoro**;
+  selector de tarea y categoría; rango 10–120 min. Controles iniciar/pausar/reanudar/detener.
 - Estado del timer persistido en `localStorage` (`TimerState`) para sobrevivir a refrescos;
   el tiempo se calcula por timestamps (no por contadores) para funcionar en background.
 - Al completar: sonido (`public/sounds/bell.wav`) + notificación del navegador. `MiniTimer`
-  permite ver el timer activo desde otras vistas.
+  se renderiza en una ventana flotante (Document Picture-in-Picture) con icono propio
+  (`app/icons/timer/route.tsx`) y el tiempo restante en el título; sigue abierta al navegar
+  por la app y se cierra al cerrar sesión.
+- **Ejecución en segundo plano:** mientras el reloj corre, `TimerProvider` retiene un Web Lock
+  (Chromium no congela ni descarta pestañas con un lock tomado, lo que evita que las
+  "pestañas en suspensión" de Edge maten la sesión y la ventana flotante) y el latido sale de
+  un Worker (no sufre el recorte de temporizadores de pestañas ocultas). Si aun así el final se
+  detecta tarde, la sesión se guarda con la hora real de término (`resolveEnd`), no con la de
+  detección.
 - **Historial** (`SessionHistory`): sesiones completadas con filtros.
 - **Estadísticas** (`StudyStats`): tarjetas de resumen, gráfica de barras de minutos por
   día (Recharts), **tabla de tiempo por categoría** (`CategoryBreakdown`) ordenable y
