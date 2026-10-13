@@ -501,6 +501,15 @@ de 10 del temporizador.
   un Worker (no sufre el recorte de temporizadores de pestañas ocultas). Si aun así el final se
   detecta tarde, la sesión se guarda con la hora real de término (`resolveEnd`), no con la de
   detección.
+- **Controles instantáneos e idempotentes:** cada clic (iniciar, pausar, detener…) cambia el
+  estado en el acto mediante `commit()`, que escribe `stateRef` de forma síncrona. El guardado
+  va después y en segundo plano, y los manejadores ignoran los clics que no aplican (pausar dos
+  veces, detener con el reloj parado). Cada tramo lleva un `sessionId` generado al arrancar, que
+  viaja como `id` del insert: un guardado repetido no crea otra fila (`SessionModel.create`
+  devuelve la existente ante un `23505`). `createSessionAction` no llama a `revalidatePath`,
+  porque eso volvía lento "Detener". La ventana flotante es un `createPortal` del mismo árbol, no
+  una segunda raíz. El segundero va en un contexto aparte (`useTimerClock()`), y el estado se
+  sincroniza entre pestañas con el evento `storage`.
 - **Historial** (`SessionHistory`): sesiones completadas con filtros.
 - **Estadísticas** (`StudyStats`): tarjetas de resumen, gráfica de barras de minutos por
   día (Recharts), **tabla de tiempo por categoría** (`CategoryBreakdown`) ordenable y

@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { memo, useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Play, Pause, Square, PictureInPicture2, Target, X, Coffee, SkipForward } from 'lucide-react';
 import { toast } from 'sonner';
 import { updateSessionAction } from '@/app/(app)/timer/actions';
-import type { Category, OpenTask, StudySession, TaskQuadrant } from '@/lib/types';
+import type { Category, OpenTask, PomodoroSettings, StudySession, TaskQuadrant } from '@/lib/types';
 import { formatMinutes, type FocusRatingKey, type StatsSession } from '@/lib/stats';
 import { MIN_TIMER_MINUTES, MAX_TIMER_MINUTES } from '@/lib/models/SessionModel';
 import { formatDuration, getCircumference } from '@/lib/utils';
@@ -13,7 +14,7 @@ import { SessionForm } from './SessionForm';
 import { StudyStats } from './StudyStats';
 import { StudyGoals } from './StudyGoals';
 import { FocusRatingPicker } from './focusRating';
-import { useTimer } from './TimerProvider';
+import { useTimer, useTimerClock } from './TimerProvider';
 
 // Rango del selector de duración del temporizador (en minutos). Vive en el
 // modelo para que la UI y la validación de servidor no puedan divergir.
@@ -82,7 +83,6 @@ export function TimerClient({
   const {
     state,
     setState,
-    secondsLeft,
     totalDuration,
     phaseLabel,
     awaitingBreak,
@@ -101,7 +101,9 @@ export function TimerClient({
     changeMode: handleModeChange,
     onSessionSaved,
   } = useTimer();
-  const [activeTab, setActiveTab] = useState<'history' | 'stats' | 'goals'>('history');
+  const secondsLeft = useTimerClock();
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<TimerTab>('history');
   const [sessions, setSessions] = useState(initialSessions);
   // Se mantiene aparte del historial para que las estadísticas sigan cubriendo
   // el año completo y a la vez se actualicen al guardar una sesión nueva.
@@ -145,7 +147,20 @@ export function TimerClient({
   // Las sesiones que guarda el reloj (el proveedor) entran en las listas de
   // esta pantalla. Las que se guardan estando en otra página llegan con el
   // fetch del servidor al volver a /timer.
-  useEffect(() => onSessionSaved(applySavedSession), [onSessionSaved, applySavedSession]);
+  //
+  // El refresco del servidor va aparte y sin esperar a nadie: el guardado ya
+  // no revalida la página (hacía lento "Detener"), pero el tiempo acumulado de
+  // las tareas del selector sí se calcula en el servidor.
+  useEffect(
+    () =>
+      onSessionSaved((saved) => {
+        applySavedSession(saved);
+        router.refresh();
+      }),
+    [onSessionSaved, applySavedSession, router]
+  );
+
+  const openNewSession = useCallback(() => setEditing(null), []);
 
   function removeSession(id: string) {
     setSessions((prev) => prev.filter((s) => s.id !== id));
@@ -542,43 +557,18 @@ export function TimerClient({
       )}
 
       {/* History / Stats */}
-      <div className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-card)] overflow-hidden">
-        <div className="flex border-b border-[var(--color-gray-border)]">
-          {(['history', 'stats', 'goals'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`flex-1 py-3 text-sm font-medium transition-colors ${
-                activeTab === tab
-                  ? 'text-[var(--color-primary)] border-b-2 border-[var(--color-primary)]'
-                  : 'text-[var(--color-text-soft)] hover:text-[var(--color-text)]'
-              }`}
-            >
-              {tab === 'history' ? 'Historial' : tab === 'stats' ? 'Estadísticas' : 'Metas'}
-            </button>
-          ))}
-        </div>
-
-        <div className="p-6">
-          {activeTab === 'history' ? (
-            <SessionHistory
-              sessions={sessions}
-              onCreate={() => setEditing(null)}
-              onEdit={(session) => setEditing(session)}
-            />
-          ) : activeTab === 'stats' ? (
-            <StudyStats sessions={statsSessions} />
-          ) : (
-            <StudyGoals
-              sessions={statsSessions}
-              dailyGoal={dailyGoal}
-              weeklyGoal={weeklyGoal}
-              pomodoro={pomodoro}
-              onPomodoroChange={setPomodoro}
-            />
-          )}
-        </div>
-      </div>
+      <TimerTabs
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        sessions={sessions}
+        statsSessions={statsSessions}
+        dailyGoal={dailyGoal}
+        weeklyGoal={weeklyGoal}
+        pomodoro={pomodoro}
+        onPomodoroChange={setPomodoro}
+        onCreate={openNewSession}
+        onEdit={setEditing}
+      />
 
       {editing !== undefined && (
         <SessionForm
@@ -593,3 +583,73 @@ export function TimerClient({
     </div>
   );
 }
+
+type TimerTab = 'history' | 'stats' | 'goals';
+
+interface TimerTabsProps {
+  activeTab: TimerTab;
+  onTabChange: (tab: TimerTab) => void;
+  sessions: HistorySession[];
+  statsSessions: StatsSession[];
+  dailyGoal: number;
+  weeklyGoal: number;
+  pomodoro: PomodoroSettings;
+  onPomodoroChange: (settings: PomodoroSettings) => void;
+  onCreate: () => void;
+  onEdit: (session: StudySession) => void;
+}
+
+/**
+ * Historial, estadísticas y metas. Va memoizado porque `TimerClient` se
+ * re-renderiza cada segundo con el reloj en marcha, y estas pestañas (gráficos
+ * incluidos) no dependen del segundero: re-pintarlas cada segundo competía en
+ * el hilo principal con los clics de los controles.
+ */
+const TimerTabs = memo(function TimerTabs({
+  activeTab,
+  onTabChange,
+  sessions,
+  statsSessions,
+  dailyGoal,
+  weeklyGoal,
+  pomodoro,
+  onPomodoroChange,
+  onCreate,
+  onEdit,
+}: TimerTabsProps) {
+  return (
+    <div className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-card)] overflow-hidden">
+      <div className="flex border-b border-[var(--color-gray-border)]">
+        {(['history', 'stats', 'goals'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => onTabChange(tab)}
+            className={`flex-1 py-3 text-sm font-medium transition-colors ${
+              activeTab === tab
+                ? 'text-[var(--color-primary)] border-b-2 border-[var(--color-primary)]'
+                : 'text-[var(--color-text-soft)] hover:text-[var(--color-text)]'
+            }`}
+          >
+            {tab === 'history' ? 'Historial' : tab === 'stats' ? 'Estadísticas' : 'Metas'}
+          </button>
+        ))}
+      </div>
+
+      <div className="p-6">
+        {activeTab === 'history' ? (
+          <SessionHistory sessions={sessions} onCreate={onCreate} onEdit={onEdit} />
+        ) : activeTab === 'stats' ? (
+          <StudyStats sessions={statsSessions} />
+        ) : (
+          <StudyGoals
+            sessions={statsSessions}
+            dailyGoal={dailyGoal}
+            weeklyGoal={weeklyGoal}
+            pomodoro={pomodoro}
+            onPomodoroChange={onPomodoroChange}
+          />
+        )}
+      </div>
+    </div>
+  );
+});

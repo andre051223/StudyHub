@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Coffee, Pause, PictureInPicture2, Play, SkipForward, Square, X } from 'lucide-react';
 import { formatDuration } from '@/lib/utils';
-import { useTimer } from './TimerProvider';
+import { useTimer, useTimerClock } from './TimerProvider';
 
 const iconButton =
   'flex items-center justify-center w-8 h-8 rounded-lg text-[var(--color-text-soft)] hover:bg-[var(--color-gray-light)] hover:text-[var(--color-text)] transition-colors';
@@ -24,7 +24,6 @@ export function TimerIndicator() {
   const pathname = usePathname();
   const {
     state,
-    secondsLeft,
     phaseLabel,
     awaitingBreak,
     awaitingFocus,
@@ -37,6 +36,7 @@ export function TimerIndicator() {
     stop,
     skipBreak,
   } = useTimer();
+  const secondsLeft = useTimerClock();
 
   const active = state.isRunning || awaitingBreak || awaitingFocus;
   if (!active || pathname.startsWith('/timer')) return null;

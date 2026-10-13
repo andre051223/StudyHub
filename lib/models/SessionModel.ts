@@ -39,6 +39,12 @@ const PLANNED_RANGE: Record<StudyMode, { min: number; max: number } | null> = {
 };
 
 export interface CreateSessionInput {
+  /**
+   * Id generado por el cliente al arrancar el reloj. Hace el guardado
+   * idempotente: si la misma sesión llega dos veces (reintento, doble clic),
+   * el segundo insert choca con la PK y se devuelve la fila ya guardada.
+   */
+  id?: string;
   category_id?: string | null;
   /** Tarea sobre la que se estudió. Null = sesión suelta (migración 006). */
   task_id?: string | null;
@@ -138,6 +144,7 @@ export class SessionModel extends BaseModel {
     const { data, error } = await this.supabase
       .from('study_sessions')
       .insert({
+        ...(input.id ? { id: input.id } : {}),
         user_id: userId,
         category_id: input.category_id ?? null,
         task_id: input.task_id ?? null,
@@ -151,6 +158,21 @@ export class SessionModel extends BaseModel {
         focus_rating: input.focus_rating ?? null,
       })
       .select('*, category:categories(name, color), task:tasks(id, title)')
+      .single();
+    if (error) {
+      // 23505 = clave duplicada: esta sesión ya se guardó con ese id.
+      if (error.code === '23505' && input.id) return this.findOwned(input.id, userId);
+      this.handleError(error);
+    }
+    return data;
+  }
+
+  private async findOwned(id: string, userId: string): Promise<StudySession> {
+    const { data, error } = await this.supabase
+      .from('study_sessions')
+      .select('*, category:categories(name, color), task:tasks(id, title)')
+      .eq('id', id)
+      .eq('user_id', userId)
       .single();
     if (error) this.handleError(error);
     return data;

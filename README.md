@@ -32,7 +32,7 @@ StudyHub es una aplicación web construida con **Next.js 16** y **Supabase** que
 - **Notas** con editor de texto enriquecido (Tiptap), organización en carpetas, sistema de etiquetas y búsqueda full-text en español.
 - **Tareas** organizadas en la Matriz de Eisenhower con tablero Kanban de 4 cuadrantes y drag & drop.
 - **Agenda** semanal de fechas límite: donde la matriz responde «qué es importante», la agenda responde «qué me cae encima esta semana».
-- **Temporizador** de estudio en modo simple (cuenta regresiva) o cronómetro (stopwatch), que puede apuntar a una tarea concreta, con historial de sesiones, estadísticas visuales y metas diarias/semanales.
+- **Temporizador** de estudio en modo simple (cuenta regresiva), cronómetro (stopwatch) o Pomodoro configurable, que puede apuntar a una tarea concreta, con ventana flotante, historial de sesiones, estadísticas visuales y metas diarias/semanales.
 
 Se apoya en un **dashboard** de resumen, **categorías/materias** compartidas entre tareas y sesiones, una **búsqueda global** sobre notas y tareas accesible con `Ctrl+K`, **modo claro/oscuro** y capacidades **PWA** (instalable, con lectura de apuntes sin conexión). Todo con autenticación segura, datos aislados por usuario mediante Row Level Security, diseño responsivo y una capa completa de servicios web **REST** y **SOAP** que expone la lógica de negocio como API consumible desde cualquier cliente.
 
@@ -76,7 +76,7 @@ StudyHub implementa el patrón **Modelo — Vista — Controlador** aprovechando
 │  ├── tasks/TasksClient.tsx      ← tablero Kanban Eisenhower         │
 │  ├── notes/NotesClient.tsx      ← lista de notas con filtros        │
 │  ├── agenda/AgendaClient.tsx    ← semana de fechas límite           │
-│  ├── timer/TimerClient.tsx      ← temporizador (simple / stopwatch) │
+│  ├── timer/TimerClient.tsx      ← temporizador (simple/crono/pomo.) │
 │  ├── categories/CategoriesClient.tsx  ← CRUD de categorías          │
 │  └── shared/CommandPalette.tsx  ← búsqueda global (Ctrl+K)          │
 └──────────────────────┬──────────────────────────────────────────────┘
@@ -173,6 +173,11 @@ StudyHub implementa el patrón **Modelo — Vista — Controlador** aprovechando
 5. revalidatePath() refresca la pantalla
 6. Devuelve ActionResult: { ok: true, data } o { ok: false, error }
 ```
+
+> **Excepción: `createSessionAction`** no llama a `revalidatePath()`. Esa llamada obliga al
+> servidor a re-renderizar la página actual y devolverla en la misma respuesta, y hacía que
+> "Detener" tardara segundos. El reloj inserta la sesión en las listas desde el cliente y
+> refresca el resto en segundo plano (ver [Temporizador](#temporizador-de-estudio)).
 
 **Flujo de una petición SOAP (ejemplo: GetTaskStats):**
 
@@ -284,6 +289,8 @@ Valores válidos para `quadrant`: `urgent_important` · `not_urgent_important` �
 Valores válidos para `mode`: `simple` · `stopwatch` · `pomodoro` · `manual`. La duración *planeada* depende del modo: 10–120 min en `simple`, 5–90 en `pomodoro`, y `null` obligatorio en `stopwatch` y `manual`, que no planean nada.
 
 `focus_rating` es opcional y admite `focused` · `ok` · `distracted`.
+
+`id` (UUID) es opcional y hace **idempotente** el registro: si se envía y ya existe una sesión del usuario con ese id, se devuelve la existente en lugar de crear otra. El temporizador lo genera al arrancar cada tramo, así que un guardado repetido (doble clic, reintento, dos pestañas) nunca duplica la sesión.
 
 `PATCH` acepta cualquier subconjunto de los campos anteriores **salvo `mode`**: cómo se midió el tiempo es un hecho, no una preferencia, y poder reescribirlo dejaría el historial sin forma de distinguir lo cronometrado de lo registrado a mano.
 
@@ -463,6 +470,7 @@ studyhub/
 │   │   └── reset-password/           # Restablecimiento de contraseña
 │   ├── (app)/                        # Rutas protegidas (requieren sesión)
 │   │   ├── layout.tsx                # Guard de sesión + Navbar + paleta de comandos
+│   │   │                             #   + TimerProvider/TimerIndicator (reloj global)
 │   │   ├── loading.tsx               # Esqueleto de carga del área autenticada
 │   │   ├── actions.ts                # searchAction — búsqueda global (Ctrl+K)
 │   │   ├── dashboard/                # Resumen del día: metas, vencimientos, atajos
@@ -480,7 +488,7 @@ studyhub/
 │   │   ├── folders/                  # route.ts · [id]/route.ts
 │   │   ├── sessions/                 # route.ts · [id]/route.ts
 │   │   └── soap/route.ts             # GET (WSDL) · POST (envelope)
-│   ├── icons/                        # icon-192, icon-512 (rutas dinámicas PWA)
+│   ├── icons/                        # icon-192, icon-512 (PWA) y timer (ventana flotante)
 │   ├── screenshots/[variant]/        # Capturas wide/narrow del manifest (PWA)
 │   ├── icon.tsx / apple-icon.tsx     # Favicons generados
 │   ├── manifest.ts                   # Web App Manifest: iconos, capturas y shortcuts
@@ -495,7 +503,8 @@ studyhub/
 │   ├── notes/                        # NoteEditor, NotesClient, OfflineNotesCache
 │   ├── tasks/                        # TasksClient, KanbanColumn, TaskCard, TaskModal
 │   ├── agenda/                       # AgendaClient — vista semanal de fechas límite
-│   ├── timer/                        # TimerClient, MiniTimer, SessionHistory,
+│   ├── timer/                        # TimerProvider (motor global), TimerIndicator,
+│   │                                 #   TimerClient, MiniTimer, SessionHistory,
 │   │                                 #   SessionForm (alta y edición manual),
 │   │                                 #   StudyStats, StudyGoals, CategoryBreakdown,
 │   │                                 #   StudyHeatmap, StudyPatterns, focusRating
@@ -639,19 +648,20 @@ Registra sesiones de estudio con estadísticas para seguimiento del hábito.
 **Modos:**
 - **Simple:** cuenta regresiva de duración libre de 10 a 120 minutos.
 - **Stopwatch:** cronómetro ascendente sin límite fijo.
-
-> El modo **pomodoro** es legado: ya no es seleccionable en la UI, pero se conserva en el enum
-> para mostrar sesiones antiguas.
+- **Pomodoro:** bloques de foco y descansos con duraciones configurables en el perfil (migración 009).
 
 **Funcionalidades:**
+- **Reloj global:** el motor vive en `TimerProvider`, montado en el layout del área autenticada, así que la sesión sigue corriendo y se guarda al terminar aunque se navegue por notas, tareas o la agenda. Fuera de `/timer`, `TimerIndicator` muestra el reloj con sus controles.
+- **Ventana flotante** (`MiniTimer`, Document Picture-in-Picture, Chrome/Edge 116+): reloj siempre visible encima de otras aplicaciones, con pausar/detener e icono propio. Es un `createPortal` del mismo árbol de React, así que refleja cada clic en el mismo render.
+- **Controles instantáneos y a prueba de repeticiones:** pausar, detener o iniciar cambia el estado en el acto. El guardado va después y en segundo plano, y los clics repetidos se ignoran. Detener ocho veces seguidas registra una sola sesión.
+- **Fiable en segundo plano:** un Web Lock evita que Edge duerma la pestaña con el reloj en marcha, y el latido sale de un Worker, que no sufre el recorte de temporizadores de las pestañas ocultas. Con varias pestañas abiertas, el estado se sincroniza entre ellas.
 - **Sesión ligada a una tarea concreta** (migración 006): el selector lista las tareas pendientes y hereda su categoría. Es lo que conecta el temporizador con el Kanban en las dos direcciones — elegir sobre qué se estudia, y ver después cuánto se le dedicó.
 - Estado del timer persistido en `localStorage` para sobrevivir recargas; el tiempo se calcula por timestamps (no por contadores) para funcionar en segundo plano.
-- `MiniTimer` para ver el timer activo desde otras vistas.
 - **Notificaciones sonoras** (`public/sounds/bell.wav`) y **Web Notifications API** al completar.
 - **Historial** de sesiones con filtros (fecha, duración, categoría) y la tarea asociada.
 - **Estadísticas**: minutos por día (gráfica de barras, Recharts), **tabla de tiempo por categoría** ordenable y filtrable por día / semana / mes con comparativa contra el periodo anterior, **mapa de calor de constancia** (desde tu primera sesión, con un techo de un año), **franja horaria favorita** y **calidad percibida** de las sesiones, racha actual, categoría top del mes y promedio diario.
 - **Registro manual** de sesiones estudiadas sin la app, y **edición o borrado** de cualquier sesión del historial.
-- **Pomodoro configurable** (foco, descanso, descanso largo y bloques por tanda), con encadenado automático de fases.
+- **Pomodoro configurable** (foco, descanso, descanso largo y bloques por tanda). Las fases no se encadenan solas: al terminar un bloque, el usuario elige si iniciar el descanso o pasar al siguiente bloque. Cada bloque de foco se guarda como su propia sesión.
 - **Estimación por tarea** contrastada con el tiempo realmente dedicado, en el Kanban y en el propio temporizador.
 - **Metas** diaria y semanal más los ajustes del Pomodoro (`StudyGoals`), guardados en `profiles` (`daily_goal_minutes`, `weekly_goal_minutes`, `pomodoro_*`).
 

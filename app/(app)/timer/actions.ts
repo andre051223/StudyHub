@@ -37,8 +37,11 @@ export async function createSessionAction(
   try {
     const { supabase, userId } = await requireUser();
     const session = await new SessionModel(supabase).create(parsed.data, userId);
-    revalidatePath('/timer');
-    revalidatePath('/dashboard');
+    // Sin revalidatePath a propósito: obligaba a re-renderizar en el servidor
+    // la página actual y devolverla en esta misma respuesta, y eso hacía que
+    // "Detener" tardara segundos. El reloj ya inserta la sesión en las listas
+    // de /timer (TimerProvider.onSessionSaved), y /timer y /dashboard son
+    // dinámicas: se vuelven a pedir al navegar a ellas.
     return actionOk(session);
   } catch (e) {
     return actionError(e, 'No se pudo guardar la sesión.');

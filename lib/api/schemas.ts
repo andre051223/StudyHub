@@ -130,6 +130,8 @@ export const studyModeSchema = z.enum(['simple', 'stopwatch', 'pomodoro', 'manua
 export const focusRatingSchema = z.enum(['focused', 'ok', 'distracted']);
 
 export const createSessionSchema = z.object({
+  // Id generado por el reloj al arrancar: hace idempotente el guardado.
+  id: uuid.optional(),
   category_id: uuid.nullish(),
   // Tarea sobre la que se estudió (migración 006). Su pertenencia la comprueba
   // la política RLS de study_sessions, no este esquema.
